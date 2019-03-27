@@ -22,7 +22,7 @@ EPS = np.finfo(float).eps  # machine epsilon
 
 # ---- parameters & initial conditions for mxl model
 
-wdir = 'c:\\pyspace\\src\\mxl\\'
+wdir = r'c:\repositories\pyAPES-MXL'
 os.chdir(wdir)
 print('---- working dir: ' + os.getcwd())
 

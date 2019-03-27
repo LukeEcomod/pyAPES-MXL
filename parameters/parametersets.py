@@ -9,26 +9,28 @@ Created on Fri Oct 19 12:39:09 2018
 ranges = {}
 
 parameters = {
-        'count': 1,
+        'count': 5,
         'canopy': {
-            'planttypes': {
-                        'pine': {
-                                'LAImax': 5.0
+                'forestfloor': {
+                        'bryophytes': {
+                                'hylocomium': {
+                                        'ground_coverage': (0.0,0.0,1.0,0.0,0.25),
+                                        },
+                                'sphagnum': {
+                                        'ground_coverage': (0.0,1.0,0.0,0.0,0.25),
+                                        },
+                                'pleurozium': {
+                                        'ground_coverage': (0.0,0.0,0.0,0.0,0.0),
+                                        }
                                 },
-                        'spruce': {
-                                'LAImax': 0.0
+                        'litter': {
+                                'ground_coverage': (1.0,0.0,0.0,0.0,0.25)
                                 },
-                        'decidious': {
-                                'LAImax': 0.0
-                                },
-                        'shrubs': {
-                                'LAImax': 0.5
-                                },
+                        'baresoil': {
+                                'ground_coverage': (0.0,0.0,0.0,1.0,0.25)
+                                }
                         },
-                },
-        'soil': {
-
-                },
+        }
     }
 
 def iterate_parameters(parameters, default, count):

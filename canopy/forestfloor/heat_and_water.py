@@ -689,7 +689,8 @@ def water_exchange(dt,
         1.0,
         (0.1285 * water_storage / properties['dry_mass'] - 0.1285)
     )
-
+    print('ws', water_storage)
+    print('fr', relative_conductance)
     # [mol m-2 s-1]
     conductance_to_air_h2o = (
         conductance_to_air['h2o'] * relative_conductance
@@ -792,7 +793,8 @@ def water_exchange(dt,
     )
 
     # [kg m-2] or [mm]
-    new_water_storage = dy_water * dt + water_storage
+    """ SL 6.3.19 """
+    new_water_storage = dy_water * dt+ water_storage
 
     # [g g-1]
     new_water_content = new_water_storage / properties['dry_mass']
@@ -816,8 +818,6 @@ def water_exchange(dt,
     )
 
     # --- Heat exchange dummy variables ---
-
-
     moss_thermal_conductivity = thermal_conduction(new_volumetric_water)
     thermal_conductivity = (
         np.power(moss_thermal_conductivity
@@ -830,9 +830,10 @@ def water_exchange(dt,
         * (forcing['air_temperature'] - forcing['soil_temperature'])
     )
 
-    latent_heat = (
-        LATENT_HEAT * (evaporation_rate + EPS) / MOLAR_MASS_H2O
-    )
+#    latent_heat = (
+#        LATENT_HEAT / (MOLAR_MASS_H2O * evaporation_rate + EPS)
+#    )
+    latent_heat = LATENT_HEAT * (evaporation_rate + EPS) / MOLAR_MASS_H2O
 
     sensible_heat = (
         SPECIFIC_HEAT_AIR
@@ -1249,43 +1250,43 @@ def surface_atm_conductance(wind_speed, height, friction_velocity=None, dT=0.0, 
     """
     KERSTI! Testaa tätä moss_atm_conductance(args) tilalla; katsotaan räjähtääkö malli / palaako sammalet.
     Inputtina: Uref=U[1], zref = z[1], ustar = ustar[1] (tai zom = forest floor roughness length)
-
+    
     ustar[1]: closure_model_1_U palauttaa tau/ustar0 - profiilin -->
     ustar[1] = srt(abs(tau)) * ustar0, jossa ustar0 = mallin pakote
-
+    
     Voi olla että pitää muuttaa Ubot = 0.01*Utop tms. ettei U mene ihan nollaan pinnan lähellä.
-
+    
     Tämä funktio ei ota huomioon sammalten ominaisuuksia mutta voi olla robustimpi
     ja samaa voi käyttää myös paljaalle maalle / litter -kerrokselle.
-
+    
     """
-
-    Sc_v = AIR_VISCOSITY / MOLECULAR_DIFFUSIVITY_H2O
+    
+    Sc_v = AIR_VISCOSITY / MOLECULAR_DIFFUSIVITY_H2O  
     Sc_c = AIR_VISCOSITY / MOLECULAR_DIFFUSIVITY_CO2
-    Pr = AIR_VISCOSITY / THERMAL_DIFFUSIVITY_AIR
+    Pr = AIR_VISCOSITY / THERMAL_DIFFUSIVITY_AIR 
     kv = 0.4  # von Karman constant (-)
     d = 0.0 # displacement height
-
+    
     if friction_velocity == None:
         friction_velocity = wind_speed * kv / np.log((height - d) / zom)
 
-    delta = MOLECULAR_DIFFUSIVITY_H2O / (kv*friction_velocity)
-
+    delta = AIR_VISCOSITY / (kv*friction_velocity)
+    
     gb_h = (kv*friction_velocity) / (Pr - np.log(delta / height))
     gb_v = (kv*friction_velocity) / (Sc_v - np.log(delta / height))
     gb_c = (kv*friction_velocity) / (Sc_c - np.log(delta / height))
-
+    
     # free convection as parallel pathway, based on Condo and Ishida, 1997.
     #b = 1.1e-3 #ms-1K-1 b=1.1e-3 for smooth, 3.3e-3 for rough surface
     dT = np.maximum(dT, 0.0)
-
+    
     gf_h = b * dT**0.33  # ms-1
 
-    # mol m-2 s-1
+    # mol m-2 s-1    
     gb_h = (gb_h + gf_h) * AIR_DENSITY
     gb_v = (gb_v + Sc_v / Pr * gf_h) * AIR_DENSITY
     gb_c = (gb_c + Sc_c / Pr * gf_h) * AIR_DENSITY
-
+    
 #    plt.figure()
 #    plt.plot(friction_velocity, gb_v, '-')
     return {'co2': gb_c, 'h2o': gb_v, 'heat': gb_h}
@@ -1722,6 +1723,7 @@ def bryophyte_shortwave_albedo(water_content, properties=None):
         albedo_par = properties['optical_properties']['albedo_PAR']
         normalized_water_content = water_content / properties['max_water_content']
 
+#        scaling_coefficient = 0.2 / (1 - 0.9 * np.power(1.8703, -normalized_water_content))
         scaling_coefficient = 1.0 + (4.5 - 1.0) / (1.00 + np.power(10, 4.53 * normalized_water_content))
 
         albedo_par = scaling_coefficient * albedo_par

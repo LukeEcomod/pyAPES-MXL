@@ -31,7 +31,7 @@ class Soil(object):
         Args:
             p (dict):
                 'grid' (dict):
-                    'zh' (list/array?): bottom elevation of layers with different parametrizations [m], soil surface = 0.0
+                    'zh' (list/array): bottom elevation of layers with different parametrizations [m], soil surface = 0.0
                     'dz' (list/array): thickness of computational layers [m]
                 'profile_properties' (dict): all parameters given as list/array of len(zh)
                     'pF' (dict): water retention parameters (van Genuchten)

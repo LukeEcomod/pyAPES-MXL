@@ -305,7 +305,7 @@ class Bryophyte(object):
             forcing=forcing,
             parameters=parameters)
 
-        # unit conversion: 1000 kg m-2 s-1 = mm s-1
+        # unit conversion: 1 kg m-2 s-1 = mm s-1
 
         soil_evaporation = {key: value * MOLAR_MASS_H2O for key, value in soil_evaporation.items()}
 

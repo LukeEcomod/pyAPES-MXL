@@ -55,7 +55,7 @@ baresoil = {
                 'albedo_NIR': 0.5,  # [-]
                 },
         'respiration': {
-                'R10': 2.5,  # base heterotrophic respiration rate [umolm-2s-1]
+                'R10': 3.5,  # base heterotrophic respiration rate [umolm-2s-1]
                 'Q10': 2.0,  # temperature sensitivity [-]
                 'limitpara': [3.83, 4.43, 1.25, 0.854]  # Skopp respiration function param [a ,b, d, g]
                 }
@@ -175,7 +175,7 @@ Pleurozium = {
 Hylocomium = {
         "species": "Hylocomium splendens",  # (Hedw.) B.S.G.
         "ground_coverage":1.0,
-        "height": 0.06,  # Soudziloskaia et al (2013)
+        "height": 0.06, #0.06,  # Soudziloskaia et al (2013)
         "roughness_height": 0.01,
         "leaf_area_index": 1.212,
         "specific_leaf_area": 145.0,  # Bond-Lamberty and Gower (2007)

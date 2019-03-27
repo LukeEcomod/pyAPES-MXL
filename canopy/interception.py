@@ -34,8 +34,8 @@ class Interception(object):
         r""" Initializes interception object.
         Args:
             p (dict):
-                'wmax': maximum interception storage capacity for rain [m H2O per unit of LAI]
-                'wmaxsnow': maximum interception storage capacity for snow [m H2O per unit of LAI]
+                'wmax': maximum interception storage capacity for rain [m per unit of LAI]
+                'wmaxsnow': maximum interception storage capacity for snow [m per unit of LAI]
                 'Tmin': temperature below which all is snow [degC]
                 'Tmax': temperature above which all is water [degC]
                 'w_ini': initial canopy storage [m]
@@ -152,14 +152,14 @@ class Interception(object):
         es, s = e_sat(Tl_wet)
         Dleaf = es / P - H2O  #np.maximum(0.0, es / P - H2O)  # [mol/mol]
         s = s / P  # [mol/mol/degC]
-
+    
         """ --- wet Leaf temperature --- """
         itermax = 20
         err = 999.0
         iterNo = 0
         while err > 0.01 and iterNo < itermax:
             iterNo += 1
-
+            
             # boundary layer conductances for H2O and heat [mol m-2 s-1]
             gb_h, _, gb_v = leaf_boundary_layer_conductance(U, lt, T, 0.5*(Tl_wet + Told) - T, P)  # OK to assume dt = 0.0?? convergence problems otherwise
 
@@ -224,6 +224,7 @@ class Interception(object):
         Evap = np.zeros(N)  # evaporation [m]
         Cond = np.zeros(N)  # condesation [m]
         Heat = np.zeros(N)  # sensible heat flux [W m-2(ground)]
+        # LE = np.zeros(N)  # latent heat flux [W m-2(ground)]
         Fr = np.zeros(N)  # sensible heat flux [W m-2(ground)]
         wf = np.zeros(N)  # wetness ratio
         Tr = np.zeros(N)  # throughfall within canopy [m]
@@ -266,7 +267,7 @@ class Interception(object):
                         P[n] = P[n+1] - Ir[n] - wf[n] * LAIz[n] * Ep[n]
                         # Condensation [m] (incl. condenstation to dry leaf and drip from wet leaf)
                         Cond[n] += LAIz[n] * Ep[n] * subdt
-                # ! condensation to dry leaf part not accounted for  in energy balance here but in dry leaf module
+                # ! condensation to dry leaf part not accounted for  in energy balance here but in dry leaf module 
                 # Sensible heat flux [W m-2(ground)] * subdt
                 Heat += wf * LAIz * Hw * subdt
                 # radiative flux [W m-2(ground)] * subdt

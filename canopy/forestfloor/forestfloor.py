@@ -166,12 +166,13 @@ class ForestFloor(object):
                 'soil_volumetric_water': [m\ :sup:`3`\  m\`-3`\ ]
                 'soil_volumetric_air': [m\ :sup:`3`\  m\`-3`\ ]
                 'soil_pond_storage': [m]
+                # EI ANNETA TÄSSÄ? 'nsteps' number of steps in odesolver
             parameters (dict):
                 'soil_thermal_conductivity': [] if energy_balance is True
                 'soil_hydraulic_conductivity': []
                 'depth': [m] first soil calculation node
                 'height': [m] first canopy calculation node
-                'nsteps': number of steps in odesolver if energy_balance is True -- CHECK?
+                # MÄÄRITELLÄÄN CANOPY:n SISÄLLÄ! nsteps': number of steps in odesolver if energy_balance is True
             controls (dict):
                 'energy_balance': boolean
         Returns:

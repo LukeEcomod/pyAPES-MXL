@@ -1,14 +1,20 @@
 # -*- coding: utf-8 -*-
 """
 GENERAL PARAMETERS
+
+case Hyde long-term trends
 """
 
+#import os
+#pid = os.getpid()
+#print(pid)
+
 gpara = {
-        'pyAPES_path': '/Users/ajkieloaho/Repositories/pyAPES/',
+        'pyAPES_path': r'c:\repositories\pyAPES_Samuli',
         'dt' : 1800.0,  # timestep in forcing data file [s]
         'start_time' : "2005-05-01",  # start time of simulation [yyyy-mm-dd]
-        'end_time' : "2005-11-01",  #"2018-01-01",  # end time of simulation [yyyy-mm-dd]
-        'forc_filename' : "Hyde_forcing_1997_2016.csv",  # forcing data file*
+        'end_time' : "2005-08-31",  #"2018-01-01",  # end time of simulation [yyyy-mm-dd]
+        'forc_filename' : "FIHy_forcing_1997-2017.dat",  # 'Hyde_forcing_1997_2016.csv', # forcing data file*
         'results_directory':'results/pyAPES/',
         'variables': [['forcing_air_temperature', 'above canopy air temperature [degC]', ('date', 'simulation')],
                       ['forcing_precipitation', 'precipitation [m s-1]', ('date', 'simulation')],
@@ -19,12 +25,12 @@ gpara = {
                       ['forcing_friction_velocity','friction velocity [m s-1]', ('date', 'simulation')],
                       ['canopy_WMA_assumption','WMA assumed (1=True, 0=False)', ('date', 'simulation')],
                       ['canopy_h2o','H2O concentration [mol mol-1]', ('date', 'simulation', 'canopy')],
-#                      ['canopy_co2','CO2 concentration [ppm]', ('date', 'simulation', 'canopy')],
-                      ['canopy_temperature','air temperature [degC]', ('date', 'simulation', 'canopy')],
+                      ['canopy_co2','CO2 concentration [ppm]', ('date', 'simulation', 'canopy')],
+                      ['canopy_temperature','air temperature []degC]', ('date', 'simulation', 'canopy')],
                       ['canopy_wind_speed','canopy wind speed [m s-1]', ('date', 'simulation', 'canopy')],
                       ['canopy_friction_velocity','canopy friction velocity [m s-1]', ('date', 'simulation', 'canopy')],
-#                      ['canopy_lad','leaf area density [m3 m-2]', ('date', 'simulation', 'canopy')],
-#                      ['canopy_sunlit_fraction','fraction of sunlit leafs [-]', ('date', 'simulation', 'canopy')],
+                      ['canopy_lad','leaf area density [m3 m-2]', ('date', 'simulation', 'canopy')],
+                      ['canopy_sunlit_fraction','fraction of sunlit leafs [-]', ('date', 'simulation', 'canopy')],
                       ['canopy_LAI','canopy LAI [m2 m-2]', ('date', 'simulation')],
                       ['canopy_phenostate','canopy phenological state [-]', ('date', 'simulation')],
                       ['canopy_interception', 'canopy interception [m s-1]', ('date', 'simulation')],
@@ -33,7 +39,6 @@ gpara = {
                       ['canopy_condensation', 'condensation to canopy interception storage [m s-1]', ('date', 'simulation')],
                       ['canopy_condensation_drip', 'condensation to canopy that drips [m s-1]', ('date', 'simulation')],
                       ['canopy_transpiration','transpiration [m s-1]', ('date', 'simulation')],
-                      ['canopy_pt_root_water_potential', 'root water potential [m]', ('date', 'simulation', 'planttype')],
                       ['canopy_pt_transpiration', 'transpiration [m s-1]', ('date', 'simulation', 'planttype')],
                       ['canopy_pt_gpp', 'gross primary production [umol m-2 s-1]', ('date', 'simulation', 'planttype')],
                       ['canopy_pt_respiration', 'dark respiration [umol m-2 s-1]', ('date', 'simulation', 'planttype')],
@@ -47,13 +52,19 @@ gpara = {
                       ['canopy_Tleaf_sh', 'shaded leaf temperature [degC]', ('date', 'simulation', 'canopy')],
                       ['canopy_leaf_net_LW', 'net leaf longwave radiation [W m-2]', ('date', 'simulation', 'canopy')],
                       ['canopy_leaf_SW_absorbed', 'leaf absorbed shortwave radiation [W m-2]', ('date', 'simulation', 'canopy')],
+                      ['canopy_PARdn', 'downwdard PAR [W m-2 ground]', ('date', 'simulation', 'canopy')],
+                      ['canopy_PARup', 'updard PAR [W m-2 ground]', ('date', 'simulation', 'canopy')],
+                      ['canopy_NIRdn', 'downwdard INR [W m-2 ground]', ('date', 'simulation', 'canopy')],
+                      ['canopy_NIRup', 'updard NIR [W m-2 ground]', ('date', 'simulation', 'canopy')], 
+                      ['canopy_LWdn', 'downwdard LW [W m-2 ground]', ('date', 'simulation', 'canopy')],
+                      ['canopy_LWup', 'updard LW [W m-2 ground]', ('date', 'simulation', 'canopy')],                      
                       ['canopy_throughfall', 'throughfall to moss or snow [m s-1]', ('date', 'simulation')],
                       ['canopy_evaporation_ml', 'evaporation from interception storage (condensation incl.) [m s-1]', ('date', 'simulation', 'canopy')],
                       ['canopy_throughfall_ml', 'throughfall within canopy [m s-1]', ('date', 'simulation', 'canopy')],
                       ['canopy_condensation_drip_ml', 'condensation drip within canopy [m s-1]', ('date', 'simulation', 'canopy')],
-#                      ['canopy_co2_flux', 'co2 flux [umol m-2 s-1]', ('date', 'simulation', 'canopy')],
-#                      ['canopy_latent_heat_flux', 'latent heat flux [W m-2]', ('date', 'simulation', 'canopy')],
-#                      ['canopy_sensible_heat_flux', 'sensible heat flux [W m-2]', ('date', 'simulation', 'canopy')],
+                      ['canopy_co2_flux', 'co2 flux [umol m-2 s-1]', ('date', 'simulation', 'canopy')],
+                      ['canopy_latent_heat_flux', 'latent heat flux [W m-2]', ('date', 'simulation', 'canopy')],
+                      ['canopy_sensible_heat_flux', 'sensible heat flux [W m-2]', ('date', 'simulation', 'canopy')],
                       ['canopy_SH', 'sensible heat flux [W m-2]', ('date', 'simulation')],
                       ['canopy_LE', 'latent heat flux [W m-2]', ('date', 'simulation')],
                       ['canopy_SWnet', 'net shortwave radiation [W m-2]', ('date', 'simulation')],
@@ -68,7 +79,6 @@ gpara = {
                       ['soil_infiltration', 'infiltration [m s-1]', ('date', 'simulation')],
                       ['soil_surface_runoff', 'surface runoff [m s-1]', ('date', 'simulation')],
                       ['soil_evaporation', 'evaporation from soil surface [m s-1]', ('date', 'simulation')],
-                      ['soil_transpiration', 'transpiration from soil [m s-1]', ('date', 'simulation')],
                       ['soil_drainage', 'subsurface drainage [m s-1]', ('date', 'simulation')],
                       ['soil_temperature', 'soil temperature [degC]', ('date', 'simulation', 'soil')],
                       ['soil_volumetric_water_content', 'soil water content [m3/m3]', ('date', 'simulation', 'soil')],
@@ -84,8 +94,8 @@ gpara = {
                       ['ffloor_potential_infiltration', 'potential infiltration to soil [m s-1]', ('date', 'simulation')],
                       ['ffloor_snow_water_equivalent', 'snow water equivalent [m]', ('date', 'simulation')],
                       ['ffloor_ground_heat', 'ground heat flux (forest floor) [W m-2]', ('date', 'simulation')],
-                      ['ffloor_sensible_heat_flux', 'sensible heat flux (forest floor) [W m-2]', ('date', 'simulation')],
-                      ['ffloor_latent_heat_flux', 'latent heat flux (forest floor) [W m-2]', ('date', 'simulation')],
+                      ['ffloor_sensible_heat', 'sensible heat flux (forest floor) [W m-2]', ('date', 'simulation')],
+                      ['ffloor_latent_heat', 'latent heat flux (forest floor) [W m-2]', ('date', 'simulation')],
                       ['ffloor_snow_water_closure', "water balance error (snowcover) [m s-1]", ('date', 'simulation')],
                       ['ffloor_bryo_water_closure', "water balance error (bryophytes) [m s-1]", ('date', 'simulation')],
                       ['ffloor_bryo_energy_closure', "energy balance error (bryophytes) [W m-2]", ('date', 'simulation')],
@@ -103,8 +113,8 @@ gpara = {
                       ['ffloor_litter_temperature', 'temperature (litter) [degC]', ('date', 'simulation')],
                       ['ffloor_bryo_temperature', 'temperature (bryophyte) [degC]', ('date', 'simulation')],
                       ['ffloor_soil_temperature', 'temperature (soil) [degC]', ('date', 'simulation')],
-                      ['ffloor_bryo_water_storage', 'water storage (bryophytes) [kg m-2]', ('date', 'simulation')],
-                      ['ffloor_litter_water_storage', 'water storage (litter) [kg m-2]', ('date', 'simulation')],
+                      ['ffloor_bryo_water_storage', 'water storage (bryophytes) [m]', ('date', 'simulation')],
+                      ['ffloor_litter_water_storage', 'water storage (litter) [kg m-2 or m??]', ('date', 'simulation')],
                       ['ffloor_capillar_rise', 'capillary rise to bryophyte layer [m s-1]', ('date', 'simulation')],
                       ]}
 

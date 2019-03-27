@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 CANOPY MODEL PARAMETERS
+
+Parameters for planttypes and forestfloor are given in separate files and
+imported here!
 """
 
+# import planttype & forestfloor parameter dictionaries
 from .planttype import planttypes
 from .forestfloor import forestfloor
 
@@ -19,19 +23,22 @@ grid = {'zmax': 30.0,  # heigth of grid from ground surface [m]
 # --- control flags (True/False) ---
 ctr = {'Eflow': True,  # ensemble flow
        'WMA': False, # well-mixed assumption
+       #'StomaModel': 'MEDLYN_FARQUHAR',  # stomatal model
        'Ebal': True,  # computes leaf temperature by solving energy balance
-       'WaterStress': 'PsiL',  # Rew or PsiL or None
+       #'SwModel': 'ZhaoQualls',
+       #'LwModel': 'ZhaoQualls',  #'Flerchinger'},  #
+       'WaterStress': 'Rew',  # Rew or PsiL or None
        'seasonal_LAI': True,  # account for seasonal LAI dynamics
        'pheno_cycle': True  # account for phenological cycle
        }
 
 # --- micrometeo ---
 micromet = {'zos': 0.01,  # forest floor roughness length [m]  -- not used?
-            'dPdx': 0.01,  # horizontal pressure gradient
+            'dPdx': 0.01, #0.01,  # horizontal pressure gradient
             'Cd': 0.15,  # drag coefficient
             'Utop': 5.0,  # ensemble U/ustar
             'Ubot': 0.0,  # lower boundary
-            'Sc': {'T': 2.0, 'H2O': 2.0, 'CO2': 2.0}  # Schmidt numbers
+            'Sc': {'T': 1.0, 'H2O': 1.0, 'CO2': 1.0}  # Schmidt numbers
             }
 
 # --- radiation ---

@@ -14,7 +14,8 @@ Note:
     - absolute import
     - added parenthesis to print
     - list(range(...)) forward-compatible: from builtins import range, import can be removed later
-
+Changelog:
+    -26.02.19 / SL: changed call and eps --> EPS.
 References:
 Launiainen, S., Katul, G.G., Lauren, A. and Kolari, P., 2015. Coupling boreal
 forest CO2, H2O and energy flows by a vertically structured forest canopy –
@@ -26,7 +27,7 @@ import pandas as pd
 import logging
 from tools.utilities import tridiag
 from matplotlib import pyplot as plt
-from .constants import DEG_TO_RAD, DEG_TO_KELVIN, STEFAN_BOLTZMANN, SPECIFIC_HEAT_AIR, EPS
+from .constants import EPS, DEG_TO_RAD, DEG_TO_KELVIN, STEFAN_BOLTZMANN, SPECIFIC_HEAT_AIR
 logger = logging.getLogger(__name__)
 
 class Radiation(object):
@@ -39,9 +40,13 @@ class Radiation(object):
                 'clump': clumping index [-]
                 'leaf_angle': leaf-angle distribution [-]
                 'Par_alb': shoot Par-albedo [-]
-                'Nir_alb': shoot NIR-albedo [-]
                 'leaf_emi': 0.98
-            Ebal (bool): True solves LW radiation
+            Ebal: boolean; True solves LW radiation
+            # following are given as time-dependent parameters in function calls
+            #'soil_Par_alb': soil (moss) Par-albedo [-] --- SHOULD COME FROM ForestFloor
+            #'Nir_alb': shoot NIR-albedo [-]
+            #'soil_Nir_alb': soil (moss) NIR-albedo [-] --- SHOULD COME FROM ForestFloor
+            #'soil_emi': 0.98,
         Returns:
             self (object)
         """
@@ -56,7 +61,6 @@ class Radiation(object):
         # model functions to use
         self.SWmodel = 'ZHAOQUALLS'
         self.LWmodel = 'ZHAOQUALLS'
-
         logger.info('Shortwave radiation model: %s', self.SWmodel)
         if Ebal:
             logger.info('Longwave radiation model: %s', self.LWmodel)
@@ -108,9 +112,8 @@ class Radiation(object):
                        'ground': SWb[0] + SWd[0],
                        'up': SWu,
                        'down': SWb + SWd}
-
-            # ADD OTHER MODELS??
-
+        # ADD OTHER MODELS??
+        
             return results
 
         else:
@@ -177,6 +180,7 @@ class Radiation(object):
         }
 
         return results
+
 
 """
 stand-alone functions start here: these can be called with arguments only
@@ -247,7 +251,7 @@ def solar_angles(lat, lon, jday, timezone=+2.0):
 
 def kbeam(ZEN, x=1.0):
     """
-    COMPUTES BEAM ATTENUATION COEFFICIENT Kb (-) for given solar zenith angle
+    COMPUTES BEAM ATTENUATION COEFFICIENT Kb (-) for given solar zenith angle 
     ZEN (rad) and leaf angle distribution x (-)
     IN:
         ZEN (rad): solar zenith angle
@@ -342,8 +346,8 @@ def canopy_sw_ZhaoQualls(LAIz, Clump, x, ZEN, IbSky, IdSky, LeafAlbedo, SoilAlbe
         to simulate shortwave radiation distribution within a homogenous plant
          canopy. Water Resources Res. 41, W08409, 1-16.
     NOTE:
-        At least for conifers NIR LeafAlbedo has to be decreased from leaf-scale  values to
-        correctly model canopy albedo of clumped canopies.
+        At least for conifers NIR LeafAlbedo has to be decreased from leaf-scale  values to correctly 
+        model canopy albedo of clumped canopies.
         Adjustment from ~0.7 to 0.55 seems to be sufficient. This corresponds roughlty to
         a=a_needle*[4*STAR / (1- a_needle*(1-4*STAR))], where a_needle is needle albedo
         and STAR silhouette to total area ratio of a conifer shoot. STAR ~0.09-0.21 (mean 0.14)
@@ -572,7 +576,7 @@ def canopy_sw_ZhaoQualls(LAIz, Clump, x, ZEN, IbSky, IdSky, LeafAlbedo, SoilAlbe
         plt.subplot(224)
         plt.plot(q_sl, -Lcumo/Clump, 'ro-', q_sh, -Lcumo/Clump, 'bo-')
 #        plt.plot((-SWdo[:-1]+SWdo[1:]-SWuo[1:]+SWuo[:-1])/(LAIz[:-1]+EPS),-Lcumo[1:]/Clump,'-k')
-        plt.plot((1-np.exp(-Kd*Lo))*(SWdo + SWuo)/(LAIz+EPS),-Lcumo/Clump,'-k')
+        plt.plot((1-np.exp(-Kd*Lo))*(SWdo + SWuo)/(LAIz + EPS),-Lcumo/Clump,'-k')
         plt.ylabel("-Lcum eff.")
         plt.xlabel("Absorbed radiation (Wm-2 (leaf))")
         plt.legend(('sunlit', 'shaded'), loc='best')

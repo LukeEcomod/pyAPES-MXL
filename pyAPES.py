@@ -27,12 +27,12 @@ To call model and read results:
 """
 
 import numpy as np
-from matplotlib import pyplot as plt
 import time
 from copy import deepcopy as copy
 
-from tools.iotools import read_forcing, initialize_netcdf,  write_ncf
-from tools.iotools import jsonify
+from tools.iotools import initialize_netcdf,  write_ncf
+from tools.iotools import read_hyde_forcing as read_forcing
+#from tools.iotools import jsonify
 from canopy.canopy import CanopyModel
 from soil.soil import Soil
 
@@ -76,19 +76,6 @@ def driver(create_ncf=False,
                            gpara['start_time'],
                            gpara['end_time'],
                            dt=gpara['dt'])
-
-# SINGLE SOIL LAYER
-#    # read soil moisture and temperature
-#    df = read_forcing(gpara['forc_filename'],
-#                      gpara['start_time'],
-#                      gpara['end_time'],
-#                      dt=gpara['dt'],
-#                      cols=['Tsoil','Wliq'])
-#
-#    forcing[['Tsoil','Wliq']] = df[['Tsoil','Wliq']].copy()
-#    # set first values as initial conditions
-#    spara['heat_model']['initial_condition']['temperature'] = forcing['Tsoil'].iloc[0]
-#    spara['water_model']['initial_condition']['volumetric_water_content'] = forcing['Wliq'].iloc[0]
 
     default_params = {
             'canopy': cpara,
@@ -143,12 +130,13 @@ def driver(create_ncf=False,
         results = {task.Nsim: task.run() for task in tasks}
         output_file = results
         logger.info('Running time %.2f seconds' % (time.time() - running_time))
-
-    return output_file
+    
+    return output_file, tasks[0]
 
 
 class Model(object):
     """
+    pyAPES full model
     """
     def __init__(self,
                  gen_para,
@@ -168,15 +156,14 @@ class Model(object):
 
         # create soil model instance
         self.soil = Soil(soil_para)
-
+        
         # initial delayed temperature and degreedaysum for pheno & LAI-models
-
         if 'X' in forcing:
             for pt in list(canopy_para['planttypes'].keys()):
                 canopy_para['planttypes'][pt]['phenop'].update({'Xo': forcing['X'].iloc[0]})
         if 'DDsum' in forcing:
             for pt in list(canopy_para['planttypes'].keys()):
-                canopy_para['planttypes'][pt]['laip'].update({'DDsum0': forcing['DDsum'].iloc[0]})
+                canopy_para['planttypes'][pt]['laip'].update({'DDsum0': forcing['DDsum'].iloc[0]})           
 
         # create canopy model instance
         self.canopy_model = CanopyModel(canopy_para, self.soil.grid['dz'])
@@ -198,22 +185,24 @@ class Model(object):
         #print('RUNNING')
         k_steps=np.arange(0, self.Nsteps, int(self.Nsteps/10))
         for k in range(0, self.Nsteps):
-
+            
+            # progress bar
             if k in k_steps[:-1]:
                 s = str(np.where(k_steps==k)[0][0]*10) + '%'
                 print('{0}..'.format(s), end=' ')
 
-            """ Canopy, moss and Snow """
-            # run daily loop (phenology and seasonal LAI)
+            """ Canopy, moss and snow """
+            # run daily loop (phenology, seasonal LAI and drought response)
             if self.forcing['doy'].iloc[k] != self.forcing['doy'].iloc[k-1] or k == 0:
                 self.canopy_model.run_daily(
                         self.forcing['doy'].iloc[k],
-                        self.forcing['Tdaily'].iloc[k])
-            # properties of first soil node
-
+                        self.forcing['Tdaily'].iloc[k],
+                        Rew=self.forcing['Rew'].iloc[k])
+            
+            # compile canopy forcing from ubc and uppermost soil layer state
             canopy_forcing = {
                 'soil_temperature': self.soil.heat.T[0],
-                'soil_water_potential': self.soil.water.h[self.canopy_model.ix_roots],
+                'soil_water_potential': self.soil.water.h[0],
                 'soil_volumetric_water': self.soil.heat.Wliq[0],
                 'soil_volumetric_air': self.soil.heat.Wair[0],
                 'soil_pond_storage': self.soil.water.h_pond,
@@ -234,51 +223,50 @@ class Model(object):
 
             canopy_parameters = {
                 'soil_depth': self.soil.grid['z'][0],
-                'soil_hydraulic_conductivity': self.soil.water.Kv[self.canopy_model.ix_roots],
+                'soil_hydraulic_conductivity': self.soil.water.Kv[0],
                 'soil_thermal_conductivity': self.soil.heat.thermal_conductivity[0],
-# SINGLE SOIL LAYER
-#                'state_water':{'volumetric_water_content': self.forcing['Wliq'].iloc[k]},
-#                'state_heat':{'temperature': self.forcing['Tsoil'].iloc[k]}
                 'date': self.forcing.index[k]
             }
 
-            # run timestep loop
+            
+            # run self.canopy_model
             canopy_flux, canopy_state, ffloor_flux, ffloor_state = self.canopy_model.run_timestep(
                 dt=self.dt,
                 forcing=canopy_forcing,
                 parameters=canopy_parameters
             )
 
-            # --- Water and Heat in soil ---
+            # --- Water and Heat flows in soil ---
             # potential infiltration and evaporation from ground surface
             soil_forcing = {
                 'potential_infiltration': ffloor_flux['potential_infiltration'],
-                'potential_evaporation': (ffloor_flux['evaporation_soil'] +
-                                          ffloor_flux['capillar_rise'] +
-                                          ffloor_flux['pond_recharge']),
-                'atmospheric_pressure_head': -1.0E6,  # set to large value, because potential_evaporation already account for h_soil
+                'potential_evaporation': (
+                    ffloor_flux['evaporation_soil'] + ffloor_flux['capillar_rise']
+                ),
+                'atmospheric_pressure_head': -1000.0,  # approx. water potential in ambient air.
                 'ground_heat_flux': -ffloor_flux['ground_heat'],
                 'date': self.forcing.index[k]}
 
-            # run soil water and heat flow
+            # FOR SINGLE SOIL LAYER DRIVEN BY MEASUREMENTS UPDATE SOIL STATE
+            # FROM FORCING DATA
+            
+            if self.soil.solve_heat == False:
+                soil_forcing.update({'state_heat':
+                    {'temperature': self.forcing['Ts'].iloc[k]}})
+            if self.soil.solve_water == False:
+                soil_forcing.update({'state_water':
+                    {'volumetric_water_content': self.forcing['Ws'].iloc[k]}})
+                
+            # transpiration sink [m s-1]
+            rootsink =  self.canopy_model.rad * canopy_flux['transpiration']
+
+            # run self.soil
             soil_flux, soil_state = self.soil.run(
                     dt=self.dt,
                     forcing=soil_forcing,
-                    water_sink=canopy_flux['root_sink'])
-
-#            plt.figure(97)
-#            plt.plot(canopy_flux['root_sink']/self.soil.grid['dz'][self.canopy_model.ix_roots])
-#
-#            plt.figure(98)
-#            plt.plot(self.canopy_model.rad)
-#
-#            plt.figure(99)
-#            plt.plot(self.soil.water.h[self.canopy_model.ix_roots])
-#
-#            plt.figure(100)
-#            plt.plot(self.soil.water.Kv[self.canopy_model.ix_roots])
-
-            forcing_state = {
+                    water_sink=rootsink)
+            
+            forcing_ubc = {
                     'wind_speed': self.forcing['U'].iloc[k],
                     'friction_velocity': self.forcing['Ustar'].iloc[k],
                     'air_temperature': self.forcing['Tair'].iloc[k],
@@ -291,7 +279,7 @@ class Model(object):
             ffloor_state.update(ffloor_flux)
             soil_state.update(soil_flux)
 
-            self.results = _append_results('forcing', k, forcing_state, self.results)
+            self.results = _append_results('forcing', k, forcing_ubc, self.results)
             self.results = _append_results('canopy', k, canopy_state, self.results)
             self.results = _append_results('ffloor', k, ffloor_state, self.results)
             self.results = _append_results('soil', k, soil_state, self.results)
