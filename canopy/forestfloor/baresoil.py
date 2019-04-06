@@ -81,7 +81,7 @@ def heat_balance(forcing, parameters, controls, properties, temperature):
             'h2o': [mol mol\ :sup:`-1`\ ]
             'air_pressure': [Pa]
             'forestfloor_temperature': [degC]
-            'soil_tempereture': [degC]
+            'soil_temperature': [degC]
             'soil_water_potential': [m]
             'par': [W m-2]
             'nir': [W m-2]

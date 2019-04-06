@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from mxl import CP_AIR_MASS, MAIR_DRY, MH2O, NT, R
 # --- import model class and utility functions from module mxl
 from mxl import MXLmodel, air_density, read_forcing
+
 #import mxl # mixed-layer model
 
 EPS = np.finfo(float).eps  # machine epsilon
@@ -28,7 +29,7 @@ print('---- working dir: ' + os.getcwd())
 
 print('---- reading forcing ---')
 # --- read forcing for testing mxl growth
-ffile = 'forc_2010_d184_186.dat'
+ffile = r'forcing\forc_2010_d184_186.dat'
 
 fday = '2010-07-03'
 lday = '2010-07-03'

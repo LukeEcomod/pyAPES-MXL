@@ -28,6 +28,7 @@ import logging
 from tools.utilities import tridiag
 from matplotlib import pyplot as plt
 from .constants import EPS, DEG_TO_RAD, DEG_TO_KELVIN, STEFAN_BOLTZMANN, SPECIFIC_HEAT_AIR
+#from .constants import EPS, DEG_TO_RAD, DEG_TO_KELVIN, STEFAN_BOLTZMANN, SPECIFIC_HEAT_AIR
 logger = logging.getLogger(__name__)
 
 class Radiation(object):
@@ -93,7 +94,6 @@ class Radiation(object):
             to simulate shortwave radiation distribution within a homogenous plant
             canopy. Water Resources Res. 41, W08409, 1-16.
         """
-
         radtype = parameters['radiation_type'].upper()
         if radtype == 'PAR' or radtype == 'NIR':
 

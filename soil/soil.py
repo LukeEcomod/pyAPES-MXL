@@ -85,7 +85,7 @@ class Soil(object):
 
         # grid
         dz = np.array(p['grid']['dz'])
-        z = dz / 2 - np.cumsum(dz)  # depth of nodes from soil surface
+        z = dz / 2.0 - np.cumsum(dz)  # depth of nodes from soil surface
         N = len(dz)
         self.Nlayers = N
 

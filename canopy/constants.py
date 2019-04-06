@@ -14,6 +14,8 @@ Note:
 
 import numpy as np
 
+#print('importing canopy.constants')
+
 #: machine epsilon
 EPS = np.finfo(float).eps
 
@@ -31,8 +33,10 @@ MOLAR_MASS_AIR = 29.0e-3
 SPECIFIC_HEAT_H2O = 4.18e3
 #: [J kg\ :sup:`-1` K\ :sup:`-1`\ ], specific heat of organic matter
 SPECIFIC_HEAT_ORGANIC_MATTER = 1.92e3
-#: [J mol\ :sup:`-1` K\ :sup:`-1`\ ], heat capacity of air at constant pressure
+#: [J mol\ :sup:`-1` K\ :sup:`-1`\ ], molar heat capacity of air at constant pressure
 SPECIFIC_HEAT_AIR = 29.3
+#: [J kg\ :sup:`-1` K\ :sup:`-1`\ ], mass-based heat capacity of air at constant pressure
+SPECIFIC_HEAR_AIR_MASS = 1004.67  
 #: [W m\ :sup:`-2` K\ :sup:`-4`\ ], Stefan-Boltzmann constant
 STEFAN_BOLTZMANN = 5.6697e-8
 #: [-], von Karman constant

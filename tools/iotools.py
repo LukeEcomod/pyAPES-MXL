@@ -114,8 +114,8 @@ def initialize_netcdf(variables,
 
     return ncf, ff
 
-def read_hyde_forcing(forc_filename, start_time=None, end_time=None,
-                      dt=None, na_values='NaN'):
+def read_mxl_forcing(forc_filename, start_time=None, end_time=None,
+                      dt0=1800.0, dt=1800.0, na_values='NaN'):
     """
     Reads forcing or other data from csv file to dataframe
     Args:
@@ -124,16 +124,16 @@ def read_hyde_forcing(forc_filename, start_time=None, end_time=None,
             file used
         end_time (str): ending time [yyyy-mm-dd]. to get whole day, use yyyy-mm-dd+1 
                         if None last date in file used.
-        dt (float): time step [s], if given checks
-            that dt in file is equal to this
+        dt0 (float): time step of forcing file [s]
+        dt (float): time step of output [s]
         na_values (str/float): nan value representation in file
     Returns:
-        Forc (dataframe): dataframe with datetime as index and cols read from file
+        Forc (dataframe): dataframe interpolated to dt
     """
 
     # filepath
     forc_fp = "forcing/" + forc_filename
-    dat = pd.read_csv(forc_fp, sep=',', header='infer', na_values=na_values)
+    dat = pd.read_csv(forc_fp, sep=';', header='infer', na_values=na_values)
 
     # set to dataframe index
     tvec = pd.to_datetime(dat[['year', 'month', 'day', 'hour', 'minute']])
@@ -141,9 +141,7 @@ def read_hyde_forcing(forc_filename, start_time=None, end_time=None,
     dat.index = tvec
 
     dat['doy'] = dat['doy'].astype(float)
-    dat['P'] = dat['P'].values * 1e3 # kPa --> Pa
-    dat['H2O'] = dat['H2O'].values * 1e-3 # mmol/mol --> mol/mol
-    dat['Prec'] = 1e-3*dat['Prec'] # ms-1
+    dat['Prec'] = dat['Prec'] / dt0 # mm s-1
     
     if start_time == None:
         start_time = dat.index[0]
@@ -152,130 +150,14 @@ def read_hyde_forcing(forc_filename, start_time=None, end_time=None,
     
     dat = dat[start_time:end_time]
     
-    # rename few columns
-    dat = dat.rename({'Tsa': 'Ts', 'Wa2': 'Ws'}, axis='columns')
-    
-    # re-compute Rew from 'Ws'
-    fc = 0.3
-    wp = 0.03
-    eps = 1e-12
-    
-    Wliq = dat['Ws'].values
-    Rew = np.maximum( 0.0, np.minimum( (Wliq - wp)/(fc - wp + eps), 1.0) )
-    dat['Rew'] = Rew
-    
-    # return these as minimum
-    cols = ['year', 'month', 'day', 'hour', 'minute', 'doy',
-            'Prec','P', 'Tair', 'U', 'Ustar', 'H2O', 'CO2',
-            'LWin', 'diffPar', 'dirPar', 'diffNir', 'dirNir', 'Rew',
-            'Zen', 'Ws', 'Ts', 'Tdaily', 'X', 'DDsum'
-            ]
+    # interpolate to dt
+    if dt != dt0:
+        step = '%dS' %dt
+        sampler = dat.resample(step)
+        dat = sampler.interpolate(method='nearest')
+        
+    return dat
 
-    # Forc dataframe from specified columns
-    Forc = dat[cols].copy()
-
-    # Check time step if specified
-    if dt is not None:
-        if len(set(Forc.index[1:]-Forc.index[:-1])) > 1:
-            sys.exit("Forcing file does not have constant time step")
-        if (Forc.index[1] - Forc.index[0]).total_seconds() != dt:
-            sys.exit("Forcing file time step differs from dt given in general parameters")
-    
-    # check nans
-    if Forc.isnull().values.any():
-        print(Forc.isnull().any())
-        sys.exit("NaN found in forcing data")  
-    else:
-        print('forcing load')
-    return Forc
-
-
-def read_forcing(forc_filename, start_time=None, end_time=None,
-                 cols=None, dt=None, na_values='NaN'):
-    """
-    Reads forcing or other data from csv file to dataframe
-    Args:
-        forc_filename (str): forcing file name with comma separator
-        start_time (str): starting time [yyyy-mm-dd], if None first date in
-            file used
-        end_time (str): ending time [yyyy-mm-dd]. to get whole day, use yyyy-mm-dd+1 
-                        if None last date in file used.
-        cols (list): header names to read from file, if None reads
-            variables need as input data
-        dt (float): time step [s], if given checks
-            that dt in file is equal to this
-        na_values (str/float): nan value representation in file
-    Returns:
-        Forc (dataframe): dataframe with datetime as index and cols read from file
-    """
-
-    # filepath
-    forc_fp = "forcing/" + forc_filename
-    dat = pd.read_csv(forc_fp, sep=',', header='infer', na_values=na_values)
-
-    # set to dataframe index
-#    tvec = pd.to_datetime(dat[['year', 'month', 'day', 'hour', 'minute']])
-#    tvec = pd.DatetimeIndex(tvec)
-#    dat.index = tvec
-#    
-#    dat['doy'] = dat['doy'].astype(float)
-#    dat['Prec'] = dat['Prec'] / dt  # mm s-1
-
-    dat.index = pd.to_datetime({'year': dat['yyyy'],
-                                'month': dat['mo'],
-                                'day': dat['dd'],
-                                'hour': dat['hh'],
-                                'minute': dat['mm']})
-    
-    if start_time == None:
-        start_time = dat.index[0]
-    if end_time == None:
-        end_time = dat.index[-1]
-    dat = dat[(dat.index >= start_time) & (dat.index < end_time)]
-
-    # if cols is not defined; return these as minimum
-    if cols is None:
-        cols = ['doy',
-                'Prec',
-                'P',
-                'Tair',
-                'Tdaily',
-                'U',
-                'Ustar',
-                'H2O',
-                'CO2',
-                'LWin',
-                'diffPar',
-                'dirPar',
-                'diffNir',
-                'dirNir',
-                #'Rew',
-                'Zen',
-                ]
-        # these for phenology model initialization
-        if 'X' in dat:
-            cols.append('X')
-        if 'DDsum' in dat:
-            cols.append('DDsum')
-    # or return all columns
-    elif cols == 'all':
-        cols = [col for col in dat]
-    
-    # Forc dataframe from specified columns
-    Forc = dat[cols].copy()
-
-    # Check time step if specified
-    if dt is not None:
-        if len(set(Forc.index[1:]-Forc.index[:-1])) > 1:
-            sys.exit("Forcing file does not have constant time step")
-        if (Forc.index[1] - Forc.index[0]).total_seconds() != dt:
-            sys.exit("Forcing file time step differs from dt given in general parameters")
-    
-    # Removed - I assume all forcing files have same format from now on
-#    if Forc.columns[0] == 'doy':
-#        Forc.loc[:,'Par'] = Forc['diffPar'].values + Forc['dirPar'].values
-
-    return Forc
 
 def read_results(outputfiles):
     """

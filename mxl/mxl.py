@@ -119,13 +119,13 @@ class MXLmodel():
         IN:
             dt - gross timestep
             wthetas - kinematic surface heat flux (K m s-1)
-            wqs - kinematic moisture flux (g kg-1 m s-1)
+            wqs - kinematic moisture flux (kg kg-1 m s-1)
             wcs - kinematic co2 flux (ppm m s-1)
         OUT:
             updated object
             if out = True, returns mixed-layer state variables
                 self.theta
-                self.vpd
+                self.rh
                 self.ca
                 self.U
         """
@@ -142,7 +142,7 @@ class MXLmodel():
             self.time_integrate()
         
         if out:
-            return self.theta, self.vpd, self.ca, self.U
+            return self.theta, self.rh, self.ca, self.U
         
     def tendencies(self, wthetas, wqs, wcs):
         """
@@ -212,7 +212,7 @@ class MXLmodel():
         self.lcl()
         
         # --- pressure at surface
-        self.rhoa = air_density(self.theta, 0, self.Psurf)
+        self.rhoa = air_density_from_elev(self.theta, 0.0, self.Psurf)
         
         # --- pressure, temperature and rh at entrainment layer
         self.Pe = pressure_from_elev(self.h, self.Psurf)
@@ -238,7 +238,7 @@ class MXLmodel():
         self.u_jump += u_jump_tend * self._dt # m s-1
         if self.u_jump <0:
             self.u_jump = EPS
-        # mean velocitt        
+        # mean velocity        
         self.U = np.sqrt(self.u**2. + self.wstar**2.)
         
 
@@ -255,7 +255,9 @@ class MXLmodel():
         HZ = R * self.theta / (MAIR_DRY * GRAV_CONST)  # scaling height, m
         ea =  self.rh * self.esat
         r = 0.622 * ea / (self.Psurf - ea)
+        
         self.T_lcl = 2840. / (3.5*np.log(self.theta) - np.log(self.Psurf*r / (0.622 + r)) - 7.108) + 55.
+        
         p_lcl = self.Psurf * (self.T_lcl / self.theta)**3.5
         self.h_lcl = HZ*(-np.log(p_lcl / self.Psurf))
         
@@ -274,7 +276,7 @@ def e_sat(T, Ps=101.3):
     qs = 0.622 * es / Ps # kg kg-1
     return es, qs
 
-def air_density(T, Elev, Ps=101.3):
+def air_density_from_elev(T, Elev, Ps=101.3):
     """
     Args: T [k], Elev[m], Ps [kPa]
     Returns: rho_air [kgm-3]
@@ -291,10 +293,26 @@ def pressure_from_elev(Elev, Ps=101.3):
     p = Ps*np.exp(-Elev / 8200.0)       # kPa
     return p
 
+def latent_heat_vaporization(T, units="mass"):
+    """
+    Latent heat of vaporization of water.
+    Args:
+        T - temperature (degC)
+        units - output units, "mass" = J kg-1 , "molar"= J mol-1
+    Returns:
+        Lv - latent heat of vaporization in 'units'
+    """
+    if np.any(T > 200):
+        T = T - NT  #T must be in degC
+    Lv = 1.0e6*(2.501 - 2.361e-3*T)*MH2O  # J mol-1    
+    if units=="mass":
+        Lv = Lv / MH2O  # J kg-1
+    return Lv
 
 def equilibrium_height(ustar, wthetas, thetas, f=1e-4):
     """
-    equilibrium height of stable boundary layer
+    Steady-state equilibrium height of stable boundary layer
+    Zilitinkevich, 1972. BLM 3, 141-145.
     IN:
         ustar - ms-1, mean nocturnal friction velocity
         wthetas - K ms-1, mean nocturnal kinematic heat flux
@@ -322,23 +340,3 @@ def equilibrium_height(ustar, wthetas, thetas, f=1e-4):
 #
 #        if out:
 #            return self.wstar, self.sigmaw
-
-
-# ---- data input
-
-
-def read_forcing(ffile):
-    """
-    reads 30 min forcing data and returns dataframe
-    """
-    cols = ['year','month', 'day', 'hour', 'minute', 'U', 'ust', 'Ta', 'RH', 'CO2', 'H2O', 'O3',
-            'Prec', 'P', 'dirPar', 'diffPar', 'dirNir', 'diffNir', 'Rnet', 'LWin', 'LWout',
-            'LWnet', 'Tsh', 'Tsa','Tsc', 'Wh', 'Wa', 'Wc', 'emiatm','cloudfract', 'H', 'E', 'NEE']
-
-    dat = pd.read_csv(ffile, sep=';', header=None, names=cols)#, parse_dates=[[0,1,2,3,4]])
-    tvec = pd.to_datetime(dat[['year', 'month', 'day', 'hour', 'minute']])
-    tvec = pd.DatetimeIndex(tvec)
-    doy = tvec.dayofyear
-    dat['doy'] = doy
-    return dat, tvec #, tvec
-    
