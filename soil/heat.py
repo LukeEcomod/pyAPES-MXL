@@ -204,7 +204,7 @@ def heatflow1D(t_final, grid, T_ini, Wtot, poros, solid_composition, cs, bedrock
             'energy_closure'
         state (dict):
             'temperature': [degC]
-            'volumetric_ic_content': [m3 m-3]
+            'volumetric_ice_content': [m3 m-3]
         dto (float): timestep used for solving [s]
 
     Code:

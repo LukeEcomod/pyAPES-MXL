@@ -106,7 +106,7 @@ class PlantType(object):
                 .LAI_Model (object): model for seasonal development of LAI
                 .Roots (object): root properties
         """
-        print(p)
+        #print(p)
         self.StomaModel = 'MEDLYN_FARQUHAR' # stomatal model
         
         self.Switch_pheno = ctr['pheno_cycle']  # include phenology
