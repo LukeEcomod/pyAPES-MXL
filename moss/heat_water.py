@@ -159,11 +159,15 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
     Ktf = parameters['Ktf'] # [m2s-1], heat conductivity with flow
            
     # cumulative fluxes for 0...t_final
+    Evap = 0.0
+    LEcum = 0.0
     Q_bot = 0.0
     Q_top = 0.0
     G_top = 0.0
     G_bot = 0.0
-
+    Fheat = np.zeros(N+1)
+    Eflx = np.zeros(N)
+    
     # initial state    
     T_ini = initial_state['temperature']
     W_tot = initial_state['volumetric_water_content'] + initial_state['volumetric_ice_content']
@@ -220,6 +224,17 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
         Kvap = Kvf + Kvm 
         #Kvap = spatial_average(Kvap, method='arithmetic')
                     
+        
+        # take bottom boundary conditions from previous timestep
+        q_bot = -KLh[-1] * ((h_old[-1] - forcing['hsoil']) / dz + 1)
+        #q_bot = 0.0
+        #lbc_h = ('flux', 0.0)
+        #lbc_h = ('temperature', forcing['Tsoil'])
+#        lbc_h = ('flux', Kheat[-1] * (T_old[-1] - forcing['Tsoil']) / (2*dz)) # Wm-2
+#        print(lbc_h[1])
+        #--- solve vapor phase and return E [kg m-3 s-1] & c_vap[kg m-3]
+        E, c_vap = solve_vapor(h_iter, T_iter, Kvap, ubc=forcing['c_vap'])
+        #E = np.zeros(N)    
         # initiate iteration over dt
         err_h = 999.0
         err_W = 999.0
@@ -230,7 +245,7 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
         while (err_h > crit_h or err_W > crit_W or err_Wice > crit_Wice or err_T > crit_T):
 
             iterNo += 1
-            print(t)
+            #print(t)
             # previous iteration values
             h_iter0 = h_iter.copy()                                      
             W_iter0 = W_iter.copy()
@@ -239,20 +254,17 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
             
             # --- here add solution of surface energy balance!!
             Gsurf = forcing['Gsurf']
+            ubc_h = ('flux', Gsurf) # Wm-2
             
-            #--- solve vapor phase and return E [kg m-3 s-1] & c_vap[kg m-3]
-            E, c_vap = solve_vapor(h_iter, T_iter, Kvap, ubc=forcing['c_vap'])
-            E = np.zeros(N); #c_vap = np.ones(N)*forcing['c_vap']
-
-            #--- solve liquid phase and return h [m] & W_iter [m3m-3]
-            q_bot = 0.0
-            #q_bot = -KLh[-1] * ((h_iter[-1] - forcing['hsoil']) / dz - 1)
+            # solve liquid water flow
             Ew = 1e-3 * E # evaporation / condensation [s-1]
-
+            #Ew = np.zeros(N)
             h_iter, W_iter = solve_liquid(dt, h_iter, W_iter, W_old, KLh, S=Ew, q_top=0.0, q_bot=q_bot)
-            
+
             #--- solve heat equation & liquid and ice contents
-            
+            # heat advection with liquid flow Wm-3 # HOW TO IMPLEMENT boundary conditions??
+            F = heat_advection(KLh, h_iter, T_old, q_bot, Ttop=T_old[0], Tbot=T_old[-1])
+
             # bulk soil heat capacity [Jm-3K-1]
             CP = volumetric_heat_capacity(poros, W_iter, Wice_iter)
         
@@ -261,17 +273,13 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
             
             Lv = latent_heat_vaporization(T_iter) # J kg-1
             LE = Lv*E # Wm-3
-
-            ubc_h = ('flux', Gsurf) # Wm-2
-            lbc_h = ('flux', 0.0)
-            #lbc_h = ('temperature', forcing['Tsoil'])
-            #lbc_h = ('flux', -Kheat[-1] * (T_iter[-1] - forcing['Tsoil']) / dz) # Wm-2
-
-            T_iter = solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A,
-                                Kheat, S=LE, ubc=ubc_h, lbc=lbc_h)
             
-            #T_iter = (1-gam)*T_iter0 + gam*(T_iter)
-            #print(T_iter)
+            #lower boundary condition
+            lbc_h = ('flux', Kheat[-1] * (T_iter[-2] - forcing['Tsoil']) / (2*dz)) # Wm-2
+            #lbc_h = ('flux', 20.0)
+            T_iter = solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A,
+                                Kheat, S=LE, F=F, ubc=ubc_h, lbc=lbc_h)
+            
             W_iter, Wice_iter, gamma = frozen_water(T_iter, W_iter + Wice_iter, fp=fp)
             h_iter = water_retention(pF, theta=W_iter)
             
@@ -315,7 +323,7 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
             err_T = max(abs(T_iter - T_iter0))
 
         # end of iteration loop
-
+            
         # new state
         h = h_iter.copy()
         W = W_iter.copy()
@@ -326,10 +334,18 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
 
         # cumulative fluxes over integration time
         Q_bot += q_bot * dt
-        Q_top += Ew[0] * dt
+        Q_top += E[0] * dt
+        Evap += sum(Ew*dz)*dt
+        LEcum += sum(LE*dz)*dt
         G_top += ubc_h[1] * dt
         G_bot += lbc_h[1] * dt
 
+        Eflx += Ew*dt
+        # Heat flux [J m-2]
+        Fheat[1:-1] += -Kheat[1:-1]*(T[1:] - T[:-1])/ dz * dt
+        Fheat[0] += ubc_h[1] * dt
+        Fheat[-1] += lbc_h[1] * dt
+            
         # solution time and new timestep
         t += dt
 
@@ -351,25 +367,24 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
     """ time loop ends """
 
     # mass balance error [m]
-    mbe = (sum(W_ini + Wice_ini) - sum(W + Wice))*dz + Q_bot + Q_top
+    mbe = (sum(W_ini + Wice_ini) - sum(W + Wice))*dz + Q_bot + Evap
+    
     
     # energy closure [Wm-2]
     CP_ini = volumetric_heat_capacity(poros, W_ini, Wice_ini)
-    ebe = ((sum(CP_ini*T_ini) - sum(CP*T)) * dz - G_top + G_bot) / t_final
+    CP = volumetric_heat_capacity(poros, W, Wice)
     
-#    def heat_content(x):
-#        _, wice, _ = frozen_water(x, Wtot, fp=fp, To=FREEZING_POINT_H2O)
-#        Cv = volumetric_heat_capacity(poros, cs, wtot=Wtot, wice=wice)
-#        return Cv * x - LATENT_HEAT_FREEZING * ICE_DENSITY * wice
+    ebe = sum((CP_ini * T_ini - CP * T)*dz + (Fheat[:-1] - Fheat[1:])) - LEcum
+    ebe = ebe / t_final
     
-    fluxes = {'Qtop': Q_top / t_final, # evaporation/condensation at surface (kg m-2 s-1)
+    fluxes = {'Evap': Evap / t_final,  # evaporation/condensation at surface (kg m-2 s-1)
+              'LE': LEcum / t_final,
               'Qbot': Q_bot / t_final, # liquid water flow at bottom boundary
               'Gtop': G_top / t_final, # heat flux at surface (Wm-2)
               'Gbot': G_bot / t_final, # heat flux at bottom boundary (Wm-2)
-              #'H': C_H / t_final
-              #'LWup': LWup / t_final
               'mbe': mbe,              # mass balance error (m)
-              'ebe': ebe               # energy balance error (Wm-2)
+              'ebe': ebe,               # energy balance error (Wm-2)
+              'Eflx': Eflx / t_final
               }
     
     states = {'water_potential': h,
@@ -403,7 +418,6 @@ def solve_liquid(dt, h_iter, W_iter, W_old, KLh, S, q_top, q_bot):
                 * (KLh[1:N-1] - KLh[2:N]) - S[1:-1] * dt
 
     # top node i=0 is zero flux
-    #q_sur = 0.0
     b[0] = C[0] + dt / dz2 * KLh[1]
     a[0] = 0.0
     g[0] = -dt / dz2 * KLh[1]
@@ -427,11 +441,10 @@ def solve_liquid(dt, h_iter, W_iter, W_old, KLh, S, q_top, q_bot):
     # solve new pressure head and corresponding moisture
     h_new = thomas(a, b, g, f)
     W_new = water_retention(pF, psi=h_new)
-
     
     return h_new, W_new
 
-def solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A, Kt, S, ubc, lbc):
+def solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A, Kt, S, F, ubc, lbc):
     # solves heat flow as tridiagonal system
     # N, dz, dz2 are global
 
@@ -448,7 +461,7 @@ def solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A, Kt, S, ubc
     a[1:-1] = - dt / dz2 * Kt[1:N-1]
     g[1:-1] = - dt / dz2 * Kt[2:N]
     f[1:-1] = CP_old[1:-1] * T_old[1:-1] + A[1:-1] * T_iter[1:-1] \
-            + LATENT_HEAT_FREEZING*ICE_DENSITY*(Wice_iter[1:-1] - Wice_old[1:-1]) - S[1:-1] * dt
+            + LATENT_HEAT_FREEZING*ICE_DENSITY*(Wice_iter[1:-1] - Wice_old[1:-1]) - (S[1:-1] + F[1:-1]) * dt
 
     # top node i=0
     if ubc[0] == 'flux':  # flux bc
@@ -457,7 +470,7 @@ def solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A, Kt, S, ubc
         a[0] = 0.0
         g[0] = -dt / dz2 * Kt[1]
         f[0] = CP_old[0]*T_old[0] + A[0]*T_iter[0] + LATENT_HEAT_FREEZING*ICE_DENSITY*(Wice_iter[0] - Wice_old[0])\
-                - dt / dz * F_top - dt*S[0]
+                - dt / dz * F_top - dt*(S[0] + F[0])
 
     if ubc[0] == 'temperature':  # temperature bc
         T_sur = ubc[1]
@@ -465,16 +478,16 @@ def solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A, Kt, S, ubc
         a[0] = 0.0
         g[0] = -dt / dz2 * Kt[1]
         f[0] = CP_old[0]*T_old[0] + A[0]*T_iter[0] + LATENT_HEAT_FREEZING*ICE_DENSITY*(Wice_iter[0] - Wice_old[0])\
-                + dt / dz * Kt[0]*T_sur - dt*S[0]
+                + dt / dz2 * Kt[0]*T_sur - dt*(S[0] + F[0])
 
     # bottom node i=N
     if lbc[0] == 'flux':  # flux bc
         F_bot = lbc[1]
-        b[-1] = CP[-1] + A[-1] + dt / dz * Kt[N-1]
-        a[-1] = -dt / dz * Kt[N-1]
+        b[-1] = CP[-1] + A[-1] + dt / dz2 * Kt[N-1]
+        a[-1] = -dt / dz2 * Kt[N-1]
         g[-1] = 0.0
         f[-1] = CP_old[-1]*T_old[-1] + A[-1]*T_iter[-1] + LATENT_HEAT_FREEZING*ICE_DENSITY*(Wice_iter[-1] - Wice_old[-1])\
-                - dt / dz * F_bot - dt*S[-1]
+                - dt / dz * F_bot - dt*(S[-1] + F[-1])
 
     if lbc[0] == 'temperature':  # temperature bc
         T_bot = lbc[1]
@@ -482,12 +495,33 @@ def solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A, Kt, S, ubc
         a[-1] = -dt / dz2 * Kt[N-1]
         g[-1] = 0.0
         f[-1] = CP_old[-1]*T_old[-1] + A[-1]*T_iter[-1] + LATENT_HEAT_FREEZING*ICE_DENSITY*(Wice_iter[-1] - Wice_old[-1])\
-                + dt / dz2 * Kt[N]*T_bot - dt*S[-1]
+                + dt / dz2 * Kt[N]*T_bot - dt*(S[-1] + F[-1])
 
     # solve new temperature
     T_new = thomas(a, b, g, f)
     
     return T_new
+
+def heat_advection(KLh, h, T, q_bot, Ttop, Tbot):
+    """
+    approximates heat advection with liquid water flow
+    """
+    # liquid flux m/s
+    q = np.zeros(N+1)
+    q[1:-1] = -KLh[1:-1] * ((h[0:-1] - h[1:]) / dz + 1.0)
+    q[0] = 0.0
+    q[-1] = q_bot
+    
+    # heat advection m/s*K
+    qT = np.zeros(N+1)
+    qT[0] = q[0]*Ttop
+    qT[-1] = q[-1]*Tbot
+    qT[1:-1] = q[1:-1]*T[0:-1]
+    
+    # advective heat source/sink per layer Wm-3 
+    F = -CV_WATER* np.diff(qT) / dz 
+
+    return F
 
 def solve_vapor(h, T, Kvap, ubc):
     """
@@ -520,7 +554,7 @@ def solve_vapor(h, T, Kvap, ubc):
     E[-1] = 0.0 # zero-flux
     
     return E, c
-
+ 
 def water_retention(pF, theta=None, psi=None):
     """
     Water retention curve vanGenuchten - Mualem
@@ -749,8 +783,7 @@ def molecular_diffusivity_porous_media(T, wtot, porosity, scalar, P=101300.0):
     # [mol m-3], air molar density
     #cair = P / (GAS_CONSTANT * T)
     
-    # D/Do, diffusivity in porous media relative to that in free air,
-    # Millington and Quirk (1961)
+    # D/Do, diffusivity relative to free air Millington and Quirk (1961)
     f = np.power(afp, 10.0/3.0) / porosity**2
                         
     return f * Do
@@ -859,7 +892,7 @@ def moss_atm_conductance(zref, ust=None, U=None, zom=None, dT=0.0, b=1.1e-3):
 def forward_diff(y, dx):
     """
     computes gradient dy/dx using forward difference
-    assumes dx is constatn
+    assumes dx is constant
     """
     N = len(y)
     dy = np.ones(N) * np.NaN
@@ -876,9 +909,9 @@ def central_diff(y, dx):
     dydx = np.ones(N) * np.NaN
     # -- use central difference for estimating derivatives
     dydx[1:-1] = (y[2:] - y[0:-2]) / (2 * dx)
-    # -- use forward difference at lower boundary
+    # -- use forward difference at upper boundary
     dydx[0] = (y[1] - y[0]) / dx
-    # -- use backward difference at upper boundary
+    # -- use backward difference at lower boundary
     dydx[-1] = (y[-1] - y[-2]) / dx
 
     return dydx

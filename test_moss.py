@@ -13,8 +13,8 @@ from moss.heat_and_water_flows import saturation_vapor_density, water_heat_flow,
     surface_energy_balance, water_retention, hydraulic_conductivity, thermal_conductivity, \
     molecular_diffusivity_porous_media
     
-height = 0.10 # m
-dz = 0.005
+height = 0.20 # m
+dz = 0.01
 
 z = np.arange(0, -(height +dz), -dz)
 g = np.ones(len(z))
@@ -31,10 +31,10 @@ para = {'porosity': 0.98,
         }
 
 # conductivities
-decay = np.exp(10.0*z)
-Kvf = 10 * MOLECULAR_DIFFUSIVITY_H2O * decay
-Ktf = 10 * THERMAL_DIFFUSIVITY_AIR * decay
-
+decay = np.exp(30*z)
+Kvf = 100 * MOLECULAR_DIFFUSIVITY_H2O * decay
+Ktf = 100 * THERMAL_DIFFUSIVITY_AIR * decay
+#Ktf[-2:] = THERMAL_DIFFUSIVITY_AIR
 para.update({'Kvf': Kvf, 'Ktf': Ktf})
 
 rh = 0.5
@@ -113,11 +113,11 @@ dz_soil = 0.01
 Ksoil = 0.5 # Wm-1K-1
 gsoil = 0.5 / dz_soil # Wm-2K-1
 
-forcing = {'Ta': 10.0, 'ust': 0.001, 'hsoil': -0.1, 'Tsoil': 14.5,
+forcing = {'Ta': 10.0, 'ust': 0.001, 'hsoil': -0.1, 'Tsoil': 5.0,
            'SWdn': 200.0, 'LWdn': 100.0, 'c_vap': c_vap, 'Gsurf': 0.0}
 
 #%%
-from moss.heat_and_water_flows import water_heat_flow
+from moss.heat_water import water_heat_flow
 fluxes, states, dto = water_heat_flow(t_solution, z, initial_state, forcing, para, steps=10)
 
 #%%
