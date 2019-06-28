@@ -87,20 +87,16 @@ CV_ORGANIC = 2.50e6  # dry organic matter
 #CV_MINERAL = 2.31e6  # soil minerals
 
 
-def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
+def heat_flow(self, dto, z, forcing, initial_state=None):
     
-    r""" Solves liquid water flow in 1-D using implicit, backward finite difference
-    solution of Richard's equation.
+    r""" Solves heat flow in 1-D using implicit, backward finite difference
+    solution
 
     Args:
-        t_final (float): solution timestep [s]
-        grid (dict):
-            'z': node elevations, top surface = 0.0 [m]
-            'dz': thickness of computational layers [m]
-            'dzu': distance to upper node [m]
-            'dzl': distance to lower node [m]
+        self - object
+        dto - time tstep [s]
         forcing (dict):
-            q_sink (array): sink term from layers, e.g. evaporation sink [m3 m-3 s-1]
+            S - heat sink/source [W m-3]
             #q_source (array): source due to rainfall interception per layer [m3 m-3 s-1]
         initial_state (dict):
             'water_potential': initial water potential [m]
@@ -135,122 +131,80 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
     """
     global N, dz, dz2, pF, poros
     
-    N = len(z) # zero at moss canopy top, z<= 0, constant steps
+    z = -self.z[self.canopy_nodes]
     dz = z[0] - z[1]
     dz2 = dz**2
+
+    N = len(z) # zero at moss canopy top, z<= 0, constant steps
     
+    fp = self.freezing_curve
+    poros = self.porosity
+    
+    Ktf = self.Ks # heat conductivity [m2s-1] with flow
+    
+    # initial state       
+    if initial_state:    
+        T_ini = initial_state['T']
+        W_ini, Wice_ini, gamma = frozen_water(T_ini, initial_state['Wtot'], fp)
+
+    else:
+        T_ini = self.T
+        W_ini, Wice_ini, gamma = frozen_water(T_ini, self.Wtot, fp)
+
+    """ solve for t =[0; dto] using implict iterative scheme """
+
     # initial and computational time step [s]
-    dto = t_final / steps
-    dt = dto # adjusted during solution
+    dt = dto / 5 # adjusted during solution
     dt_min = 1.0 # minimum timestep
     
     # convergence criteria
-    crit_W = 1.0e-12  # moisture [m3 m-3] 
-    crit_h = 1.0e-10  # head [m]
-    crit_T = 1e-3 # [degC]
-    crit_Wice = 1.0e-5 # ice content [m3 m-3]
-    
-    pF = parameters['pF']
-    Ksat = parameters['Ksat']
-    fp = parameters['freezing_curve']
-    poros = parameters['porosity']
-    
-    Kvf = parameters['Kvf'] # [m2s-1], vapor conductivity with flow
-    Ktf = parameters['Ktf'] # [m2s-1], heat conductivity with flow
-           
-    # cumulative fluxes for 0...t_final
-    Q_bot = 0.0
-    Q_top = 0.0
-    G_top = 0.0
-    G_bot = 0.0
+    crit_W = 1.0e-5
+    crit_T = 1e-3    
 
-    # initial state    
-    T_ini = initial_state['temperature']
-    W_tot = initial_state['volumetric_water_content'] + initial_state['volumetric_ice_content']
-
-    # Liquid and ice content, and dWliq/dTs
-    W_ini, Wice_ini, gamma = frozen_water(T_ini, W_tot, fp=fp)
-    h_ini = water_retention(pF, theta=W_ini) # h [m]
-    del W_tot
-    
-    """ solve for t =[0; t_final] using implict iterative scheme """
-    
     # variables updated during solution
     W = W_ini.copy()
     Wice = Wice_ini.copy()
-    h = h_ini.copy()
     T = T_ini.copy()
     
     t = 0.0
-    while t < t_final:
+    while t < dto:
         # solution of previous timestep
-        h_old = h.copy()
         W_old = W.copy()
         Wice_old = Wice.copy()
         T_old = T.copy()
 
         # state variables updated during iteration of time step dt
-        h_iter = h.copy()
         W_iter = W.copy()
         Wice_iter = Wice.copy()
         T_iter = T.copy()
         
-        del h, W, Wice, T
+        del W, Wice, T
         
-        # hydraulic condictivity [m s-1 = kg m-2 s-1]
-        KLh = hydraulic_conductivity(pF, W_old, Ksat=Ksat)
-        KLh = spatial_average(KLh, method='arithmetic')
         
         # bulk soil heat capacity [Jm-3K-1]
         CP_old = volumetric_heat_capacity(poros, W_old, Wice_old)
-        
-        # apparent heat capacity due to freezing/thawing [Jm-3K-1]
-        A = ICE_DENSITY*LATENT_HEAT_FREEZING*gamma
-        
+                
         # thermal conductivity in gas and liquid phases [W m-2 K-1]
         Ktm = molecular_diffusivity_porous_media(T_old, W_old + Wice_old, poros, scalar='heat') 
         
         Kheat = air_density(T_old) * SPECIFIC_HEAR_AIR_MASS * (Ktm + Ktf) + \
                 thermal_conductivity(W_old, wice=Wice_old)
         Kheat = spatial_average(Kheat, method='arithmetic')
-                    
-        # vapor conductivity [m2 s-1]
-        Kvm = molecular_diffusivity_porous_media(T_old, W_old + Wice_old, poros, scalar='h2o')
-        Kvap = Kvf + Kvm 
-        #Kvap = spatial_average(Kvap, method='arithmetic')
-                    
+                                        
         # initiate iteration over dt
-        err_h = 999.0
         err_W = 999.0
         err_Wice = 999.0
         err_T = 999.0
         iterNo = 0
-        
-        while (err_h > crit_h or err_W > crit_W or err_Wice > crit_Wice or err_T > crit_T):
+        """" JATKA TÄSTÄ!!!!!! """
+        while (err_W > crit_W or err_T > crit_T):
 
             iterNo += 1
             print(t)
-            # previous iteration values
-            h_iter0 = h_iter.copy()                                      
+            # previous iteration values                                    
             W_iter0 = W_iter.copy()
             Wice_iter0 = Wice_iter.copy()
             T_iter0 = T_iter.copy()  
-            
-            # --- here add solution of surface energy balance!!
-            Gsurf = forcing['Gsurf']
-            
-            #--- solve vapor phase and return E [kg m-3 s-1] & c_vap[kg m-3]
-            E, c_vap = solve_vapor(h_iter, T_iter, Kvap, ubc=forcing['c_vap'])
-            #E = np.zeros(N); #c_vap = np.ones(N)*forcing['c_vap']
-
-            #--- solve liquid phase and return h [m] & W_iter [m3m-3]
-            #q_bot = 0.0
-            q_bot = -KLh[-1] * ((h_iter[-1] - forcing['hsoil']) / dz - 1)
-            Ew = 1e-3 * E # evaporation / condensation [s-1]
-
-            h_iter, W_iter = solve_liquid(dt, h_iter, W_iter, W_old, KLh, S=Ew, q_top=0.0, q_bot=q_bot)
-            
-            #--- solve heat equation & liquid and ice contents
             
             # bulk soil heat capacity [Jm-3K-1]
             CP = volumetric_heat_capacity(poros, W_iter, Wice_iter)
@@ -261,9 +215,9 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
             Lv = latent_heat_vaporization(T_iter) # J kg-1
             LE = Lv*E # Wm-3
 
-            ubc_h = ('flux', Gsurf) # Wm-2
+            ubc_h = ('flux', 0.0) # Wm-2
             #lbc_h = ('flux', 0.0)
-            #lbc_h = ('temperature', forcing['Tsoil'])
+            lbc_h = ('temperature', forcing['Tsoil'])
             lbc_h = ('flux', -Kheat[-1] * (T_iter[-1] - forcing['Tsoil']) / dz) # Wm-2
 
             T_iter = solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A,

@@ -10,7 +10,7 @@ Created on Mon Apr  8 01:07:25 2019
 import numpy as np
 from scipy.optimize import fsolve
 from tools.utilities import tridiag as thomas, spatial_average
-
+import matplotlib.pyplot as plt
 #from moss_canopy import *
 
 #: machine epsilon
@@ -142,13 +142,13 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
     # initial and computational time step [s]
     dto = t_final / steps
     dt = dto # adjusted during solution
-    dt_min = 1.0 # minimum timestep
+    dt_min = 0.1 # minimum timestep
     
     # convergence criteria
-    crit_W = 1.0e-12  # moisture [m3 m-3] 
-    crit_h = 1.0e-10  # head [m]
+    crit_W = 1.0e-4  # moisture [m3 m-3] 
+    crit_h = 1.0e-5  # head [m]
     crit_T = 1e-3 # [degC]
-    crit_Wice = 1.0e-5 # ice content [m3 m-3]
+    crit_Wice = 1.0e-4 # ice content [m3 m-3]
     
     pF = parameters['pF']
     Ksat = parameters['Ksat']
@@ -165,6 +165,8 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
     Q_top = 0.0
     G_top = 0.0
     G_bot = 0.0
+    H = 0.0
+    Rnet = 0.0
     Fheat = np.zeros(N+1)
     Eflx = np.zeros(N)
     
@@ -224,17 +226,22 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
         Kvap = Kvf + Kvm 
         #Kvap = spatial_average(Kvap, method='arithmetic')
                     
-        
-        # take bottom boundary conditions from previous timestep
+        # take bottom boundary condition for water flow from previous timestep
         q_bot = -KLh[-1] * ((h_old[-1] - forcing['hsoil']) / dz + 1)
-        #q_bot = 0.0
-        #lbc_h = ('flux', 0.0)
+        q_bot = 0.0
+        
+        lbc_h = ('flux', 0.0)
         #lbc_h = ('temperature', forcing['Tsoil'])
-#        lbc_h = ('flux', Kheat[-1] * (T_old[-1] - forcing['Tsoil']) / (2*dz)) # Wm-2
+        #lbc_h = ('flux', Kheat[-1] * (T_old[-1] - forcing['Tsoil']) / (2*dz)) # Wm-2
 #        print(lbc_h[1])
+        
+        Gsurf, res = surface_energy_balance(forcing, parameters, T_iter[0], Kheat[0]/dz)
+        ubc_h = ('flux', Gsurf) # Wm-2
+
         #--- solve vapor phase and return E [kg m-3 s-1] & c_vap[kg m-3]
-        E, c_vap = solve_vapor(h_iter, T_iter, Kvap, ubc=forcing['c_vap'])
-        #E = np.zeros(N)    
+        #E, c_vap = solve_vapor(h_iter, T_iter, Kvap, ubc=forcing['c_vap'], zref=parameters['zref'])
+        #E = np.zeros(N)
+        
         # initiate iteration over dt
         err_h = 999.0
         err_W = 999.0
@@ -252,18 +259,30 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
             Wice_iter0 = Wice_iter.copy()
             T_iter0 = T_iter.copy()  
             
-            # --- here add solution of surface energy balance!!
-            Gsurf = forcing['Gsurf']
-            ubc_h = ('flux', Gsurf) # Wm-2
+            E, c_vap = solve_vapor(h_iter, T_iter, Kvap, ubc=forcing['c_vap'], zref=parameters['zref'])
+            #E = np.zeros(N)
             
             # solve liquid water flow
             Ew = 1e-3 * E # evaporation / condensation [s-1]
-            #Ew = np.zeros(N)
+            # add here constraint that Ew <= (theta - theta_r) / dt
+            f = np.where((W_iter - pF['ThetaR'] - 10*EPS)/dt - Ew <= 0)[0]
+            if len(f) >0:
+                print(f)
+            E[f] = 0.0
+            Ew[f] = 0.0
+            del f
             h_iter, W_iter = solve_liquid(dt, h_iter, W_iter, W_old, KLh, S=Ew, q_top=0.0, q_bot=q_bot)
 
             #--- solve heat equation & liquid and ice contents
-            # heat advection with liquid flow Wm-3 # HOW TO IMPLEMENT boundary conditions??
-            F = heat_advection(KLh, h_iter, T_old, q_bot, Ttop=T_old[0], Tbot=T_old[-1])
+            # --- here add solution of surface energy balance!!
+            #Gsurf = forcing['Gsurf']
+            #ubc_h = ('flux', Gsurf) # Wm-2
+            #Gsurf, res = surface_energy_balance(forcing, parameters, T_iter[0], Kheat[0]/dz)
+            #ubc_h = ('flux', Gsurf) # Wm-2
+            #ubc_h = ('flux', 0.0) # Wm-2
+            
+            # heat advection with liquid flow Wm-3 # HOW TO IMPLEMENT lower boundary condition
+            F = heat_advection(KLh, h_iter, T_old, q_bot, Tbot=forcing['Tsoil'])
 
             # bulk soil heat capacity [Jm-3K-1]
             CP = volumetric_heat_capacity(poros, W_iter, Wice_iter)
@@ -275,7 +294,7 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
             LE = Lv*E # Wm-3
             
             #lower boundary condition
-            lbc_h = ('flux', Kheat[-1] * (T_iter[-2] - forcing['Tsoil']) / (2*dz)) # Wm-2
+            #lbc_h = ('flux', Kheat[-1] * (T_iter[-2] - forcing['Tsoil']) / (2*dz)) # Wm-2
             #lbc_h = ('flux', 20.0)
             T_iter = solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A,
                                 Kheat, S=LE, F=F, ubc=ubc_h, lbc=lbc_h)
@@ -289,7 +308,7 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
                 if dt > dt_min:
                     dt = max(dt / 3.0, dt_min)
                     print('(iteration %s) Solution blowing up, retry with dt = %.1f s' %(iterNo, dt))
-
+                    #print('err_h: %.5f, errW: %.5f, errT: %.5f,, errWice: %.5f' %(err_h, err_W, err_T, err_Wice))
                     iterNo = 0
                     h_iter = h_old.copy()
                     W_iter = W_old.copy()
@@ -309,6 +328,7 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
                 if dt > dt_min:
                     dt = max(dt / 3.0, dt_min)
                     print('iteration %s) More than 20 iterations, retry with dt = %.1f s' %(iterNo, dt))
+                    print('err_h: %.5f, errW: %.5f, errT: %.5f,, errWice: %.5f' %(err_h, err_W, err_T, err_Wice))
                     iterNo = 0
                     continue
                 else:  # convergence not reached with dt=30s, break
@@ -340,12 +360,16 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
         G_top += ubc_h[1] * dt
         G_bot += lbc_h[1] * dt
 
+        # surface energy balance
+        H += res['H'][0]*dt
+        Rnet += res['Rnet'][0]*dt
+        
         Eflx += Ew*dt
         # Heat flux [J m-2]
         Fheat[1:-1] += -Kheat[1:-1]*(T[1:] - T[:-1])/ dz * dt
-        Fheat[0] += ubc_h[1] * dt
+        Fheat[0] += -ubc_h[1] * dt
         Fheat[-1] += lbc_h[1] * dt
-            
+
         # solution time and new timestep
         t += dt
 
@@ -356,7 +380,7 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
         elif iterNo >= 6:
             dt = dt / 2
         # limit to minimum of 30s
-        dt = max(dt, 30)
+        dt = max(dt, dt_min)
         
 #        # save dto for output to be used in next run
         if dt_old == t_final or t_final > t:
@@ -364,6 +388,17 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
         # limit by time left to solve
         dt = min(dt, t_final-t)
 
+        print(t)
+        
+        # fig
+        plt.figure(100)
+        plt.subplot(331); plt.plot(c_vap, z); plt.title('c vap')
+        plt.subplot(332); plt.plot(T, z); plt.title('T')
+        plt.subplot(333); plt.plot(E, z); plt.title('E')
+        plt.subplot(334); plt.plot(h, z); plt.title('head')
+        plt.subplot(335); plt.plot(W, z); plt.title('theta')
+        plt.subplot(336); plt.plot(t, res['Tsurf'], '.'); plt.title('Ts')
+        plt.subplot(337); plt.plot(Wice, z); plt.title('theta')
     """ time loop ends """
 
     # mass balance error [m]
@@ -384,7 +419,9 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
               'Gbot': G_bot / t_final, # heat flux at bottom boundary (Wm-2)
               'mbe': mbe,              # mass balance error (m)
               'ebe': ebe,               # energy balance error (Wm-2)
-              'Eflx': Eflx / t_final
+              'Eflx': Eflx / t_final,
+              'H': H /t_final,
+              'Rnet': Rnet / t_final
               }
     
     states = {'water_potential': h,
@@ -393,6 +430,17 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
               'temperature': T,
               'h2o': c_vap
             }
+    # fig
+#    plt.figure(100)
+#    plt.subplot(221)
+#    plt.plot(c_vap, z)
+#    plt.subplot(222)
+#    plt.plot(T, z)
+#    plt.subplot(223)
+#    plt.plot(E, z)
+#    plt.subplot(224)
+#    plt.plot(h, z)
+    
     return fluxes, states, dto
 
 # ---- functions to set and solve tridiagonal matrices during iteration---
@@ -502,10 +550,20 @@ def solve_heat(dt, T_iter, T_old, Wice_iter, Wice_old, CP, CP_old, A, Kt, S, F, 
     
     return T_new
 
-def heat_advection(KLh, h, T, q_bot, Ttop, Tbot):
+def heat_advection(KLh, h, T, q_bot, Tbot):
     """
     approximates heat advection with liquid water flow
+    Args:
+        KLh - hydraulic conductivity [ms-1]
+        h - potential [m]
+        T - temperature [degC]
+        q_bot - water flux through boundary [ms-1]
+        T_bot - temperature in bulk soil [degC]
+        
     """
+    if q_bot >= 0:
+        Tbot = T[-1]
+
     # liquid flux m/s
     q = np.zeros(N+1)
     q[1:-1] = -KLh[1:-1] * ((h[0:-1] - h[1:]) / dz + 1.0)
@@ -514,16 +572,17 @@ def heat_advection(KLh, h, T, q_bot, Ttop, Tbot):
     
     # heat advection m/s*K
     qT = np.zeros(N+1)
-    qT[0] = q[0]*Ttop
+    qT[0] = 0.0
     qT[-1] = q[-1]*Tbot
     qT[1:-1] = q[1:-1]*T[0:-1]
     
     # advective heat source/sink per layer Wm-3 
     F = -CV_WATER* np.diff(qT) / dz 
-
+    
+    #print(F)
     return F
 
-def solve_vapor(h, T, Kvap, ubc):
+def solve_vapor(h, T, Kvap, ubc, zref):
     """
     solves vapor concentration profile in air-space of porous media assuming
     equilibrium with liquid water in soil and steady-state conditions
@@ -532,26 +591,25 @@ def solve_vapor(h, T, Kvap, ubc):
         T - temperature (degC)
         Kvap - conductivity (m2 s-1)
         ubc - upper bc (concentration at surface air)
-        
+        zref - height of ubc above top
     Returns:
         E - evaporation/condensation rate at each layer [kg m-3 s-1]
         c - concentration profile [kg m-3]
     """
     # N, dz, dz2 are global
     #N = len(z); dz=z[1]-z[0]; dz2=dz**2
+    Esoil = 0.0
     # assume vapor density c in equilibrium with soil h
     csat = saturation_vapor_density(T) # kgm-3
     c = csat * relative_humidity(h, T)
     
-    # E = 1/dz*(dc/dz) with centered finite difference scheme
     E = np.zeros(N)
  
     # intermediate nodes
-    #E[1:-1] = (Kvap[1:N-1] * (c[0:-2] - c[1:-1]) - Kvap[1:-1] * (c[1:-1 - c[2:N]])) / dz2
-    E[1:-1] = -(Kvap[1:N-1] * (c[0:-2] - c[1:-1]) - Kvap[1:-1] * (c[1:-1] - c[2:N])) / dz2
+    E[1:-1] = -(Kvap[0:N-2] * (c[0:-2] - c[1:-1]) - Kvap[1:-1] * (c[1:-1] - c[2:N])) / dz2
     # bc's
-    E[0] = -Kvap[0] * (ubc - c[0]) * 2 / dz # forward-difference
-    E[-1] = 0.0 # zero-flux
+    E[0] = -(Kvap[0] * (ubc - c[0]) / zref - Kvap[1]*(c[0] - c[1]) / dz) / dz
+    E[-1] = -(Kvap[-2] *(c[-2] - c[-1]) / dz - Esoil ) / dz
     
     return E, c
  
@@ -620,7 +678,7 @@ def hydraulic_conductivity(pF, wliq, Ksat=1.0):
     S = np.minimum(1.0, (w - pF['ThetaR']) / (pF['ThetaS'] - pF['ThetaR']) + EPS)
 
     Kh = Ksat * S**l * (1 - (1 - S**(1/m))**m)**2
-
+    Kh = np.minimum(Kh, 1e3*EPS)
     return Kh
 
 def diff_wcapa(pF, h):
@@ -795,9 +853,9 @@ def surface_energy_balance(forcing, params, Ts, gsoil):
     zref = params['zref']
     
     #SWabs = forcing['SWabs']
-    SWup= alb * forcing['SWdn']
+    SWup = alb * forcing['SWdn']
     SWabs = (1-alb) * forcing['SWdn']
-    LWin = (1-emi) * forcing['LWdn']
+    LWin = emi * forcing['LWdn']
     ust = forcing['ust']
     Ta = forcing['Ta'] + DEG_TO_KELVIN
     Ts = Ts + DEG_TO_KELVIN
@@ -810,7 +868,7 @@ def surface_energy_balance(forcing, params, Ts, gsoil):
     
     def surface_temperature(T, *para):
         a, b, c, d, Ta, Ts = para
-        f = a - b * np.power(T, 4) - c*(T - Ta) - d *(T - Ts)
+        f = a - b * np.power(T, 4) - c*(T - Ta) + d *(T - Ts)
         
         return f
 
@@ -835,9 +893,9 @@ def surface_energy_balance(forcing, params, Ts, gsoil):
     G = d * (T - Ts)
     
     ebe = SWabs + LWin - LWup - H - G
-    res = {'H': H, 'G': G, 'SWup': SWup, 'LWup': LWup,
+    res = {'H': H, 'G': G, 'Rnet': SWabs + LWin - LWup, 'SWup': SWup, 'LWup': LWup,
            'Tsurf': T - DEG_TO_KELVIN, 'ebe': ebe}
-    return res
+    return G, res
 
 def moss_atm_conductance(zref, ust=None, U=None, zom=None, dT=0.0, b=1.1e-3):
     """

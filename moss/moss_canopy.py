@@ -1,294 +1,517 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sun Apr  7 04:38:23 2019
+.. module: canopy
+    :synopsis: APES-model component
+.. moduleauthor:: Kersti Haahti
 
-@author: slauniai
+Describes H2O, CO2, energy transfer in multilayer canopy.
+Based on MatLab implementation by Samuli Launiainen.
+
+Created on Tue Oct 02 09:04:05 2018
+
+Note:
+    Migrated to python3:
+        - absolute imports
+        - for each loop: usage of enumerate() instead of list(range(len(foo)))
+        - if dictionary IS modified in a for-loop dict.items()/.keys()/.values() wrapped in a list
+        (this is not necessary if only modifying and not adding/deleting)
+        - if dictionary IS NOT modified in a for-loop, wrapped anyways (for caution).
+
+References:
+Launiainen, S., Katul, G.G., Lauren, A. and Kolari, P., 2015. Coupling boreal
+forest CO2, H2O and energy flows by a vertically structured forest canopy –
+Soil model with separate bryophyte layer. Ecological modelling, 312, pp.385-405.
+
+Note: 25.02.19/SL : Check L493 T_prev
+                    Changed def run_daily call; added Rew as argument
 """
 
+import logging
+# from copy import deepcopy
 import numpy as np
-import matplotlib.pyplot as plt
+from canopy.constants import MOLAR_MASS_H2O, PAR_TO_UMOL, EPS
 
-#: machine epsilon
-EPS = np.finfo(float).eps
+from canopy.radiation import canopy_sw_ZhaoQualls as sw_model
+from canopy.radiation import canopy_lw as lw_model
 
-#: [J mol\ :sup:`-1`\ ], latent heat of vaporization at 20\ :math:`^{\circ}`\ C
-LATENT_HEAT = 44100.0
-#: [kg mol\ :sup:`-1`\ ], molar mass of H\ :sub:`2`\ O
-MOLAR_MASS_H2O = 18.015e-3
-#: [kg mol\ :sup:`-1`\ ], molar mass of CO\ :sub:`2`\
-MOLAR_MASS_CO2 = 44.01e-3
-#: [kg mol\ :sup:`-1`\ ], molar mass of C
-MOLAR_MASS_C = 12.01e-3
-#: [kg mol\ :sup:`-1`\ ], molar mass of air
-MOLAR_MASS_AIR = 29.0e-3
-#: [J kg\ :sup:`-1` K\ :sup:`-1`\ ], specific heat of H\ :sub:`2`\ O
-SPECIFIC_HEAT_H2O = 4.18e3
-#: [J kg\ :sup:`-1` K\ :sup:`-1`\ ], specific heat of organic matter
-SPECIFIC_HEAT_ORGANIC_MATTER = 1.92e3
-#: [J mol\ :sup:`-1` K\ :sup:`-1`\ ], molar heat capacity of air at constant pressure
-SPECIFIC_HEAT_AIR = 29.3
-#: [J kg\ :sup:`-1` K\ :sup:`-1`\ ], mass-based heat capacity of air at constant pressure
-SPECIFIC_HEAR_AIR_MASS = 1004.67  
-#: [W m\ :sup:`-2` K\ :sup:`-4`\ ], Stefan-Boltzmann constant
-STEFAN_BOLTZMANN = 5.6697e-8
-#: [-], von Karman constant
-VON_KARMAN = 0.41
-#: [K], zero degrees celsius in Kelvin
-DEG_TO_KELVIN = 273.15
-#: [K], zero degrees celsius in Kelvin
-NORMAL_TEMPERATURE = 273.15
-#: [mol m\ :sup:`-3`\ ], density of air at 20\ :math:`^{\circ}`\ C
-AIR_DENSITY = 41.6
-#: [m\ :sup:`2` s\ :sup:`-1`\ ], kinematic viscosity of air at 20\ :math:`^{\circ}`\ C
-AIR_VISCOSITY = 15.1e-6
-#: [m\ :sup:`2` s\ :sup:`-1`\ ], thermal diffusivity of air at 20\ :math:`^{\circ}`\ C
-THERMAL_DIFFUSIVITY_AIR = 21.4e-6
-#: [m\ :sup:`2` s\ :sup:`-1`\ ], molecular diffusvity of CO\ :sub:`2` at 20\ :math:`^{\circ}`\ C
-MOLECULAR_DIFFUSIVITY_CO2 = 15.7e-6
-#: [m\ :sup:`2` s\ :sup:`-1`\ ], molecular diffusvity of H\ :sub:`2`\ at 20\ :math:`^{\circ}`\ C
-MOLECULAR_DIFFUSIVITY_H2O = 24.0e-6
-#: [J mol\ :sup:`-1` K\ :sup:``-1], universal gas constant
-GAS_CONSTANT = 8.314
-#: [kg m\ :sup:`2` s\ :sup:`-1`\ ], standard gravity
-GRAVITY = 9.81
-#: [kg m\ :sup:`-3`\ ], water density
-WATER_DENSITY = 1.0e3
-#: [umol m\ :sup:`2` s\ :sup:`-1`\ ], conversion from watts to micromol
-PAR_TO_UMOL = 4.56
-#: [rad], conversion from deg to rad
-DEG_TO_RAD = 3.14159 / 180.0
-#: [umol m\ :sup:`-1`], O2 concentration in air
-O2_IN_AIR = 2.10e5
-# [-], von Karman constant
-VON_KARMAN = 0.41
-#: [J kg\ :sup:`-1`\ ], latent heat of freezing
-LATENT_HEAT_FREEZING = 333700.0
-#: [\ :math:`^{\circ}`\ C], freezing point of water
-FREEZING_POINT_H2O = 0.0
-#: [kg m\ :sup:`-3`\ ], densities
-ICE_DENSITY = 917.0
-
-#: [J m\ :sup:`-3`\ K \ :sup:`-1`\], thermal condutivities
-K_WATER = 0.57
-K_ICE = 2.2
-K_AIR = 0.025
-K_ORG = 0.25
-
-#: volumetric heat capacieties  [J m\ :sup:`-3`\ K \ :sup:`-1`\]
-CV_AIR = 1297.0  # air at 101kPa
-CV_WATER = 4.18e6  # water
-CV_ICE = 1.93e6  # ice
-CV_ORGANIC = 2.50e6  # dry organic matter
-#CV_MINERAL = 2.31e6  # soil minerals
+from .moss_flow import closure_model_U_moss, closure_1_model_scalar
+from .heat_and_water_flows import frozen_water, water_retention
+from canopy.interception import Interception
 
 
-def surface_atm_conductance(zref, ustar=None, U=None, dT=0.0, zom=0.01, b=1.1e-3):
-    """
-    Soil surface - atmosphere transfer conductance for scalars. Two parallel
-    mechanisms: forced and free convection
-    Args:
-        zref - reference height (m)
-        ustar - friction velocity (m/s) at log-regime. if ustar not given,
-                it is computed from Uo, zref and zom        
-        ustar- - wind speed (m/s) at zref
-        height - reference height (m). Log-profile assumed below zref.
-        zom - roughness height for momentum (m), ~0.1 x canopy height
-        ustar - friction velocity (m/s) at log-regime. if ustar not given,
-                it is computed from Uo, zref and zom
-        b - parameter for free convection. b=1.1e-3 ... 3.3e-3 from smooth...rough surface
-    Returns:
-        conductances for CO2, H2O and heat (mol m-2 s-1), dict
-    References:
-        Schuepp and White, 1975:Transfer Processes in Vegetation by Electrochemical Analog,
-        Boundary-Layer Meteorol. 8, 335-358.
-        Schuepp (1977): Turbulent transfer at the ground: on verification of
-        a simple predictive model. Boundary-Layer Meteorol., 171-186
-        Kondo & Ishida, 1997: Sensible Heat Flux from the Earth’s Surface under
-        Natural Convective Conditions. J. Atm. Sci.
-    
-    """
-    
-    Sc_v = AIR_VISCOSITY / MOLECULAR_DIFFUSIVITY_H2O  
-    Sc_c = AIR_VISCOSITY / MOLECULAR_DIFFUSIVITY_CO2
-    Pr = AIR_VISCOSITY / THERMAL_DIFFUSIVITY_AIR 
-  
-    d = 0.0 # displacement height (m), neglect 
-    
-    if ustar == None:
-        ustar = U * VON_KARMAN / np.log((zref - d) / zom)
-
-    delta = AIR_VISCOSITY / (VON_KARMAN * ustar)
-    
-    gb_h = (VON_KARMAN * ustar) / (Pr - np.log(delta / zref))
-    gb_v = (VON_KARMAN * ustar) / (Sc_v - np.log(delta / zref))
-    gb_c = (VON_KARMAN*ustar) / (Sc_c - np.log(delta / zref))
-    
-    # free convection as parallel pathway, based on Condo and Ishida, 1997.
-    #b = 1.1e-3 #ms-1K-1 b=1.1e-3 for smooth, 3.3e-3 for rough surface
-    dT = np.maximum(dT, 0.0)
-    
-    gf_h = b * dT**0.33  # ms-1
-
-    # mol m-2 s-1    
-    gb_h = (gb_h + gf_h) * AIR_DENSITY
-    gb_v = (gb_v + Sc_v / Pr * gf_h) * AIR_DENSITY
-    gb_c = (gb_c + Sc_c / Pr * gf_h) * AIR_DENSITY
-    
-#    plt.figure()
-#    plt.plot(friction_velocity, gb_v, '-')
-    return {'co2': gb_c, 'h2o': gb_v, 'heat': gb_h}
+logger = logging.getLogger(__name__)
 
 
-""" --- hydraulic properties --- """
-
-def water_retention(pF, theta=None, psi=None):
-    """
-    Water retention curve vanGenuchten - Mualem
-    Args:
-        pF - parameter dict
-        theta - vol. water content (m3m-3)
-        psi - matrix potential (m), <=0
-    Returns:
-        theta or psi
+class MLM_Moss(object):
+    r"""Multi-layer moss canopy
     """
 
-    Ts = np.array(pF['ThetaS'], ndmin=1)
-    Tr = np.array(pF['ThetaR'], ndmin=1)
-    alfa = np.array(pF['alpha'], ndmin=1)
-    n = np.array(pF['n'], ndmin=1)
-    m = 1.0 - np.divide(1.0, n)
+    def __init__(self, para, ini_cond):
+        r""" Initializes multi-layer moss object and submodel objects using given parameters.
 
-    def theta_psi(x):
-        # converts water content (m3m-3) to potential (m)
-        x = np.minimum(x, Ts)
-        x = np.maximum(x, Tr)  # checks limits
-        s = (Ts - Tr) / ((x - Tr) + EPS)
-        Psi = -1e-2 / alfa*(s**(1.0 / m) - 1.0)**(1.0 / n)  # m
-        Psi[np.isnan(Psi)] = 0.0
-        return Psi
+        Args:
+            para - dict of parameters
+            ini_cond - dict of initial conditions
 
-    def psi_theta(x):
-        # converts water potential (m) to water content (m3m-3)
-        x = 100*np.minimum(x, 0)  # cm
-        Th = Tr + (Ts - Tr) / (1 + abs(alfa*x)**n)**m
-        return Th
+        """
 
-    if theta:
-        return theta_psi(theta)
-    if psi:
-        return psi_theta(psi)
-    
-def hydraulic_conductivity(pF, x, Ksat=1):
-    r""" Unsaturated liquid-phase hydraulic conductivity following 
-    vanGenuchten-Mualem -model.
-
-    Args:
-        pF (dict):
-            'ThetaS' (float/array): saturated water content [m\ :sup:`3` m\ :sup:`-3`\ ]
-            'ThetaR' (float/array): residual water content [m\ :sup:`3` m\ :sup:`-3`\ ]
-            'alpha' (float/array): air entry suction [cm\ :sup:`-1`]
-            'n' (float/array): pore size distribution [-]
-        h (float/array): pressure head [m]
-        Ksat (float or array): saturated hydraulic conductivity [units]
-    Returns:
-        Kh (float or array): hydraulic conductivity (if Ksat ~=1 then in [units], else relative [-])
-
-    Kersti Haahti, Luke 8/1/2018
-    """
-
-    x = np.array(x)
-
-    # water retention parameters
-    alfa = np.array(pF['alpha'])
-    n = np.array(pF['n'])
-    m = 1.0 - np.divide(1.0, n)
-
-    def relcond(x):
-        Seff = 1.0 / (1.0 + abs(alfa*x)**n)**m
-        r = Seff**0.5 * (1.0 - (1.0 - Seff**(1/m))**m)**2.0
-        return r
-
-    Kh = Ksat * relcond(100.0 * np.minimum(x, 0.0))
-
-    return Kh
-
-def rh(psi, T):
-    """
-    relative humidity in equilibrium with water potential
-    Args:
-        psi - water potential [m]
-        T - temperature [degC]
-    Returns
-        rh - relative humidity [-]
-    """
-
-    rh = np.exp(GRAVITY*MOLAR_MASS_H2O*psi / (GAS_CONSTANT * (T + DEG_TO_KELVIN)))
-
-    return rh
+        # grid
+        self.z = np.linspace(0, para['grid']['zmax'], para['grid']['Nlayers'])  # grid [m] above ground
+        self.dz = self.z[1] - self.z[0]  # gridsize [m]
+        self.ones = np.ones(len(self.z))  # dummy
+        self.zref = para['zref'] # height of forcing data [m]
         
-""" --- thermal properties  --- """
+        # moss properties
+        self.hc = para['hc'] # canopy height (m)
+        self.lad = para['lad']  # shoot-area density (m2m-3)
+        self.LAI = sum(self.lad*self.dz)
+        
+        self.canopy_nodes = np.where(self.lad > 0)[0]
+        
+        # hydraulic
+        self.porosity = para['hydraulic']['porosity']
+        self.pF = para['hydraulic']['pF']
+        self.Ksat = para['hydraulic']['Ksat']
+        self.freezing_curve = para['hydraulic']['freezing_curve']
+        
+        # radiation
+        self.albedo = para['radiation'] # 'PAR', 'NIR'
+        self.emissivity = para['radiation']['emissivity']
+        self.clump = para['radiation']['clumping']
+        self.leaf_angle = para['radiation']['leaf_angle']
+        
+        #self.radiation = para['radiation']
+        
+        # compute non-dimensional flow velocity Un = U/ust and momentum diffusivity
+        Utop = ini_cond['Utop'] # U/ust at zref
+        Ubot = 0.0 # no-slip
+        self.Sc = para['Schmidt_nr']
+        _, self.Un, self.Kmn, _ = closure_model_U_moss(self.z, self.lad, self.hc, Utop, Ubot)        
+        
+        self.U = None
+        self.Ks = None
+        self.length_scale = para['length_scale']
+        
+        self.Switch_WMA = False
+        
+        # initial states
+        self.T = ini_cond['T']
+        self.Wtot = ini_cond['Wtot']
+        self.Wliq, self.Wice, _ = frozen_water(self.T, self.Wot, fp=self.freezing_curve, To=0.0)
+        self.h = water_retention(self.pF, theta=self.Wliq)
+        
+    def run_timestep(self, dt, forcing, parameters):
+        r""" Calculates one timestep and updates state of CanopyModel object.
 
-def volumetric_heat_capacity(poros, wliq=0.0, wice=0.0):
-    r""" Computes volumetric heat capacity of porous organic matter.
+        Args:
+            dt: timestep [s]
+            forcing (dataframe): meteorological and soil forcing data  !! NOT UP TO DATE
+                'precipitation': precipitation rate [m s-1]
+                'air_temperature': air temperature [\ :math:`^{\circ}`\ C]
+                'dir_par': direct fotosynthetically active radiation [W m-2]
+                'dif_par': diffuse fotosynthetically active radiation [W m-2]
+                'dir_nir': direct near infrared radiation [W m-2]
+                'dif_nir': diffuse near infrare active radiation [W m-2]
+                'lw_in': Downwelling long wave radiation [W m-2]
+                'wind_speed': wind speed [m s-1]
+                'friction_velocity': friction velocity [m s-1]
+                'co2': ambient CO2 mixing ratio [ppm]
+                'h2o': ambient H2O mixing ratio [mol mol-1]
+                'air_pressure': pressure [Pa]
+                'zenith_angle': solar zenith angle [rad]
+                'soil_temperature': [\ :math:`^{\circ}`\ C] properties of first soil node
+                'soil_water_potential': [m] properties of first soil node
+                'soil_evaporation': [molm-2s-1] from the first soil node
+                'soil_respiration': [umolm-2s-1] from the first soil node 
+            'parameters':
+                'date'
+                'thermal_conductivity': [W m\ :sup:`-1`\  K\ :sup:`-1`\ ] properties of first soil node
+                'hydraulic_conductivity': [m s\ :sup:`-1`\ ] properties of first soil node
+                'depth': [m] properties of first soil node
 
-    Args:
-        poros: porosity [m3 m-3]
-        wliq: volumetric water content [m3 m-3]
-        wice: volumetric ice content [m3 m-3]
-    Returns:
-        cv: volumetric heat capacity [J m-3 K-1]
-    """
-    wair = poros - wliq - wice
-    cv = CV_ORGANIC * (1. - poros) + CV_WATER * wliq + CV_ICE * wice + CV_AIR * wair
+        Returns:
+            fluxes (dict)
+            states (dict)
+        """
+        logger = logging.getLogger(__name__)
 
-    return cv
+        self.U = self.Un * forcing['friction_velocity']
+        self.Ks = self.Sc * self.Km * forcing['friction_velocity'] # scalar diffusivity
 
-def thermal_conductivity(wliq, wice=0.0):
-    """ thermal conductivity in organic matter"""
-    # o'Donnell et al. 2009
-    k = 0.032 + 0.5 * wliq
-    return k
+        # --- SW profiles within canopy ---
+        # PAR
+        _, _, _, PAR_sl, PAR_sh, q_sl, q_sh, q_soil, f_sl, pPAR_alb = sw_model(self.lad*self.dz,
+            self.Clump, self.leaf_angle, forcing['zenith_angle'], forcing['dir_par'], forcing['dif_par'],
+            self.albedo['PAR'], SoilAlbedo=0.0, PlotFigs=False)
+        
+        SWabs = q_sl * f_sl + q_sh * (1 - f_sl)
+        PAR_incident = PAR_TO_UMOL * (PAR_sl * f_sl + PAR_sh * (1 - f_sl)) # umolm-2s-1
 
-def latent_heat_vaporization(T):
-    """ latent heat of vaporization of water
-    Arg:
-        T - temperature (degC)
-    Returns:
-        Lv - lat. heat. of vaporization (J kg-1)
-    """
-    return 1.0e6*(2.501 - 2.361e-3*T)  # J kg-1
+        # NIR
+        _, _, _, NIR_sl, NIR_sh, q_sl, q_sh, q_soil, f_sl, NIR_alb = sw_model(self.lad*self.dz,
+            self.Clump, self.leaf_angle, forcing['zenith_angle'], forcing['dir_nir'], forcing['dif_nir'],
+            self.albedo['NIR'], SoilAlbedo=0.0, PlotFigs=False)
+        
+        SWabs += q_sl * f_sl + q_sh * (1 - f_sl)
 
-def frozen_water(T, wtot, fp=0.25, To=0.0):
-    r""" Approximates ice content from soil temperature and total water content.
+        
+        # --- iterative solution of H2O, CO2, T, Tleaf and Tsurf ---
 
-    Args:
-        T : soil temperature [degC]
-        wtot: total volumetric water content [m3 m-3]
-        fp: parameter of freezing curve [-]
-            2...4 for clay and 0.5-1.5 for sandy soils
-            < 0.5 for peat soils (Nagare et al. 2012 HESS)
-        To: freezing temperature of soil water [degC]
-    Returns:
-        wliq: volumetric water content [m3 m-3]
-        wice: volumetric ice content [m3 m-3]
-        gamma: dwice/dT
-    References:
-        For peat soils, see experiment of Nagare et al. 2012:
-        http://scholars.wlu.ca/cgi/viewcontent.cgi?article=1018&context=geog_faculty
-    """
+        max_err = 0.01  # maximum relative error
+        max_iter = 25  # maximum iterations
+        gam = 0.5  # weight for new value in iterations
+        err_t, err_h2o,err_co2 = 999., 999., 999.
+        Switch_WMA = self.Switch_WMA
 
-    wtot = np.array(wtot)
-    T = np.array(T)
-    fp = np.array(fp)
+        # initialize air-space state variables
+        T, H2O, CO2 = self._restore(forcing)
+        sources = {
+            'h2o': None,  # [mol m-3 s-1]
+            'co2': None,  # [umol m-3 s-1]
+            'sensible_heat': None,  # [W m-3]
+            'latent_heat': None,  # [W m-3]
+            'fr': None  # [W m-3]
+        }
 
-    wice = wtot*(1.0 - np.exp(-(To - T) / fp))
-    # derivative dwliq/dT
-    gamma = (wtot - wice) / fp
+        iter_no = 0
+        while (err_t > max_err or err_h2o > max_err or
+               err_co2 > max_err or err_Tl > max_err or
+               err_Ts > max_err) and iter_no <= max_iter:
 
-    ix = np.where(T > To)[0]
-    wice[ix] = 0.0
-    gamma[ix] = 0.0
+            iter_no += 1
+            Tleaf_prev = Tleaf.copy()
+            Tsurf_prev = self.forestfloor.temperature
 
-    wliq = wtot - wice
+            if self.Switch_Ebal:
+                # ---  LW profiles within canopy ---
+                ff_longwave = self.forestfloor.longwave_radiation()
+                lw_forcing = {
+                    'lw_in': forcing['lw_in'],
+                    'lw_up': ff_longwave['radiation'],
+                    'leaf_temperature': Tleaf_prev,
+                }
 
-    return wliq, wice, gamma
+                lw_params = {
+                    'LAIz': self.lad * self.dz,
+                    'ff_emissivity': ff_longwave['emissivity']
+                }
+
+                radiation_profiles['lw'] = self.radiation.longwave_profiles(
+                    forcing=lw_forcing,
+                    parameters=lw_params
+                )
+
+            # --- heat, h2o and co2 source terms
+            for key in sources.keys():
+                sources[key] = 0.0 * self.ones
+
+            # --- wet leaf water and energy balance ---
+            interception_forcing = {
+                'h2o': H2O,
+                'wind_speed': U,
+                'air_temperature': T,
+                'air_pressure': forcing['air_pressure'],
+                'leaf_temperature': Tleaf_prev,
+                'precipitation': forcing['precipitation'],
+            }
+
+            if self.Switch_Ebal:
+                interception_forcing.update({
+                    'sw_absorbed': radiation_profiles['sw_absorbed'],
+                    'lw_radiative_conductance': radiation_profiles['lw']['radiative_conductance'],
+                    'net_lw_leaf': radiation_profiles['lw']['net_leaf'],
+                })
+
+            interception_params = {
+                'LAIz': self.lad * self.dz,
+                'leaf_length': self.leaf_length
+            }
+
+            interception_controls = {
+                'energy_balance': self.Switch_Ebal,
+                'logger_info': 'date: {} iteration: {}'.format(
+                    parameters['date'],
+                    iter_no
+                )
+            }
+
+            if self.Switch_Ebal:
+                interception_forcing.update({
+                    'sw_absorbed': radiation_profiles['sw_absorbed'],
+                    'lw_radiative_conductance': radiation_profiles['lw']['radiative_conductance'],
+                    'net_lw_leaf': radiation_profiles['lw']['net_leaf'],
+                })
+
+            wetleaf_fluxes = self.interception.run(
+                dt=dt,
+                forcing=interception_forcing,
+                parameters=interception_params,
+                controls=interception_controls
+            )
+
+            # dry leaf fraction
+            df = self.interception.df
+
+            # update source terms
+            for key in wetleaf_fluxes['sources'].keys():
+                sources[key] += wetleaf_fluxes['sources'][key] / self.dz
+
+            # canopy leaf temperature
+            Tleaf = self.interception.Tl_wet * (1 - df) * self.lad
+
+            # --- dry leaf gas-exchange ---
+            pt_stats = []
+            for pt in self.planttypes:
+
+                forcing_pt = {
+                    'h2o': H2O,
+                    'co2': CO2,
+                    'air_temperature': T,
+                    'air_pressure': forcing['air_pressure'],
+                    'wind_speed': U,
+                    'par': radiation_profiles['par'],
+                    'leaf_temperature': Tleaf_prev,
+                }
+
+                if self.Switch_Ebal:
+                    forcing_pt.update({
+                        'nir': radiation_profiles['nir'],
+                        'lw': radiation_profiles['lw']
+                    })
+
+                parameters_pt = {
+                    'dry_leaf_fraction': self.interception.df,
+                    'sunlit_fraction': sunlit_fraction
+                }
+
+                controls_pt = {
+                    'energy_balance': self.Switch_Ebal,
+                    'logger_info': 'date: {} iteration: {}'.format(
+                        parameters['date'],
+                        iter_no
+                    )
+                }
+
+                if self.Switch_Ebal:
+                    forcing_pt.update({
+                        'nir': radiation_profiles['nir'],
+                        'lw': radiation_profiles['lw'],
+                    })
+
+                # --- sunlit and shaded leaves
+                pt_stats_i, pt_sources = pt.run(
+                    forcing=forcing_pt,
+                    parameters=parameters_pt,
+                    controls=controls_pt
+                )
+
+                # update source terms
+                # Dictionary IS modiefied in a loop. Wrapped in a list.
+                for key in pt_sources.keys():
+                    sources[key] += pt_sources[key]
+
+                # append results
+                pt_stats.append(pt_stats_i)
+
+                # canopy leaf temperature
+                Tleaf += pt_stats_i['Tleaf'] * df * pt.lad
+
+            # canopy leaf temperature as weighted average
+            Tleaf = Tleaf / (self.lad + EPS)
+
+            err_Tl = max(abs(Tleaf - Tleaf_prev))
+
+            # -- solve forest floor ---
+
+            ff_controls = {
+                'energy_balance': self.Switch_Ebal,
+                'logger_info': 'iteration: {}'.format(iter_no)
+            }
+
+            ff_params = {
+                'height': self.z[1],  # height to first calculation node
+                'soil_depth': parameters['soil_depth'],
+                'nsteps': 20,
+                'soil_hydraulic_conductivity': parameters['soil_hydraulic_conductivity'],
+                'soil_thermal_conductivity': parameters['soil_thermal_conductivity'],
+                'iteration': iter_no,
+            }
+
+            ff_forcing = {
+                'throughfall_rain': wetleaf_fluxes['throughfall_rain'],
+                'throughfall_snow': wetleaf_fluxes['throughfall_snow'],
+                'par': radiation_profiles['par']['ground'],
+                'air_temperature': T[1],
+                'h2o': H2O[1],
+                'precipitation_temperature': T[1],
+                'air_pressure': forcing['air_pressure'],
+                'wind_speed': U[1],
+                'friction_velocity': ustar,
+                'soil_temperature': forcing['soil_temperature'],
+                'soil_water_potential': forcing['soil_water_potential'],
+                'soil_volumetric_water': forcing['soil_volumetric_water'],
+                'soil_volumetric_air': forcing['soil_volumetric_water'],
+                'soil_pond_storage': forcing['soil_pond_storage']
+            }
+
+            if self.Switch_Ebal:
+
+                ff_forcing.update({
+                    'nir': radiation_profiles['nir']['ground'],
+                    'lw_dn': radiation_profiles['lw']['down'][0],
+                    'lw_up': radiation_profiles['lw']['up'][0]
+                })
+
+            fluxes_ffloor, states_ffloor = self.forestfloor.run(
+                dt=dt,
+                forcing=ff_forcing,
+                parameters=ff_params,
+                controls=ff_controls
+            )
+
+            err_Ts = abs(Tsurf_prev - self.forestfloor.temperature)
+
+            # check the sign of photosynthesis
+            Fc_gr = -fluxes_ffloor['bryo_photosynthesis'] + fluxes_ffloor['respiration']
+
+            """  --- solve scalar profiles (H2O, CO2, T) """
+            if Switch_WMA is False:
+                # to recognize oscillation
+                if iter_no > 1:
+                    T_prev2 = T_prev.copy()
+                T_prev = T.copy()
+
+                H2O, CO2, T, err_h2o, err_co2, err_t = self.micromet.scalar_profiles(
+                        gam, H2O, CO2, T, forcing['air_pressure'],
+                        source=sources,
+                        lbc={'H2O': fluxes_ffloor['evaporation'],
+                             'CO2': Fc_gr,
+                             'T': fluxes_ffloor['sensible_heat']},
+                        Ebal=self.Switch_Ebal)
+
+                # to recognize oscillation
+                if iter_no > 5 and np.mean((T_prev - T)**2) > np.mean((T_prev2 - T)**2):
+                    T = (T_prev + T) / 2
+                    gam = max(gam / 2, 0.25)
+
+                if (iter_no == max_iter or any(np.isnan(T)) or
+                    any(np.isnan(H2O)) or any(np.isnan(CO2))):
+
+                    if (any(np.isnan(T)) or any(np.isnan(H2O)) or any(np.isnan(CO2))):
+                        logger.debug('%s Solution of profiles blowing up, T nan %s, H2O nan %s, CO2 nan %s',
+                                         parameters['date'],
+                                         any(np.isnan(T)), any(np.isnan(H2O)), any(np.isnan(CO2)))
+                    elif max(err_t, err_h2o, err_co2, err_Tl, err_Ts) < 0.05:
+                        if max(err_t, err_h2o, err_co2, err_Tl, err_Ts) > 0.01:
+                            logger.debug('%s Maximum iterations reached but error tolerable < 0.05',
+                                         parameters['date'])
+                        break
+
+                    Switch_WMA = True  # if no convergence, re-compute with WMA -assumption
+
+                    logger.debug('%s Switched to WMA assumption: err_T %.4f, err_H2O %.4f, err_CO2 %.4f, err_Tl %.4f, err_Ts %.4f',
+                                 parameters['date'],
+                                 err_t, err_h2o, err_co2, err_Tl, err_Ts)
+
+                    # reset values
+                    iter_no = 0
+                    err_t, err_h2o, err_co2, err_Tl, err_Ts = 999., 999., 999., 999., 999.
+                    T, H2O, CO2, Tleaf = self._restore(forcing)
+            else:
+                err_h2o, err_co2, err_t = 0.0, 0.0, 0.0
+
+        """ --- update state variables --- """
+        self.interception.update()
+        self.forestfloor.update()
+
+
+        if self.Switch_Ebal:
+            # energy closure of canopy  -- THIS IS EQUAL TO frsource (the error caused by linearizing sigma*ef*T^4)
+            energy_closure =  sum((radiation_profiles['sw_absorbed'] +
+                                   radiation_profiles['lw']['net_leaf']) * self.lad * self.dz) - (  # absorbed radiation
+                              sum(sources['sensible_heat'] * self.dz)  # sensible heat
+                              + sum(sources['latent_heat'] * self.dz))  # latent heat
+
+
+        if self.Switch_WMA is False:
+            state_canopy.update({'h2o': H2O,
+                          'co2': CO2,
+                          'temperature': T,
+                          'WMA_assumption': 1.0*Switch_WMA})
+
+        if self.Switch_Ebal:
+            # layer - averaged leaf temperatures are averaged over plant-types
+            Tleaf_sl = np.where(self.lad > 0.0,
+                                sum([pt_st['Tleaf_sl'] for pt_st in pt_stats]) / (self.lad + EPS),
+                                np.nan)
+            Tleaf_sh = np.where(self.lad > 0.0,
+                                sum([pt_st['Tleaf_sh'] for pt_st in pt_stats]) / (self.lad + EPS),
+                                np.nan)
+            Tleaf_wet = np.where(self.lad > 0.0,
+                                 self.interception.Tl_wet,
+                                 np.nan)
+            SWnet = (radiation_profiles['nir']['down'][-1] - radiation_profiles['nir']['up'][-1] +
+                     radiation_profiles['par']['down'][-1] - radiation_profiles['par']['up'][-1])
+            LWnet = (radiation_profiles['lw']['down'][-1] - radiation_profiles['lw']['up'][-1])
+
+            state_canopy.update({
+                    'Tleaf_wet': Tleaf_wet,
+                    'Tleaf_sl': Tleaf_sl,
+                    'Tleaf_sh': Tleaf_sh,
+                    'Tleaf': np.where(self.lad > 0.0, Tleaf, np.nan)
+                    })
+
+            fluxes_canopy.update({
+                    'leaf_SW_absorbed': radiation_profiles['sw_absorbed'],
+                    'leaf_net_LW': radiation_profiles['lw']['net_leaf'],
+                    'sensible_heat_flux': flux_sensible_heat,  # [W m-2]
+                    'energy_closure': energy_closure,
+                    'SWnet': SWnet,
+                    'LWnet': LWnet,
+                    'PARdn': radiation_profiles['par']['down'],
+                    'PARup': radiation_profiles['par']['up'],
+                    'NIRdn': radiation_profiles['nir']['down'],
+                    'NIRup': radiation_profiles['nir']['up'],
+                    'LWdn':  radiation_profiles['lw']['down'],
+                    'LWup':  radiation_profiles['lw']['up'],
+                    'fr_source': sum(sources['fr'] * self.dz)})
+
+        return fluxes_canopy, state_canopy, fluxes_ffloor, states_ffloor
+
+    def layer_energy_balance(self, SWabs, LWabs, U, T, H2O, T0=None, h2o0=None):
+        """
+        computes layer energy balance
+        Args:
+            self - object
+            SWabs - absorbed SW [Wm-2] per layer
+            LWabs - absorbed isothermal LW radiation per layer
+            U - flow velocity [ms-1]
+            T - air-space temperature [degC]
+            H2O - air-space humidity [mol mol-1]
+        """
+        LAIz = self.lad*dz # total surface area [m2 m-2] per node
+        
+        # boundary-layer conductance [molm-2s-1]
+        gh = 0.135 * np.sqrt(U / self.length_scale)
+        gv = 0.147 * np.sqrt(U / self.length_scale)
+        
+        if T0 is None:
+            T0 = self.T
+        if h2o0 is None:
+            h2o0 = self.equilibrium_humidity
+        
+        
+        # moss temperature from last timestep/iteration
+        # moss surface humidity
+        # maximum evaporation / 
+        
+    def _restore(self, forcing):
+        """ initialize state variables """
+        T = self.ones * ([forcing['air_temperature']])
+        H2O = self.ones * ([forcing['h2o']])
+        CO2 = self.ones * ([forcing['co2']])
+
+        return T, H2O, CO2
+
+# EOF

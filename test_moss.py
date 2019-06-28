@@ -43,10 +43,6 @@ dz_soil = 0.01
 Ksoil = 0.5 # Wm-1K-1
 gsoil = 0.5 / dz_soil # Wm-2K-1
 
-
-
-
-
 #%% test solving surface temperature
 forcing = {'Ta': 20.0, 'ust': 0.001, 'hsoil': -10.0, 'Tsoil': +10.0,
            'SWdn': 200.0, 'LWdn': 100.0, 'c_vap': c_vap}
@@ -87,7 +83,6 @@ wliq, wice, gamma = frozen_water(T, w, fp=0.25)
 plt.plot(T, wliq, '-', T, wice, '--')
 
 #%%
-
 from moss.heat_and_water_flows import solve_vapor
 
 ctop = forcing['c_vap']
@@ -98,28 +93,75 @@ Kvap = para['Kvf']*g
 E, c_vap = solve_vapor(z, h, T, Kvap, ctop)
 
 #%%
-    
-    
-t_solution = 5*3600.0 #s
-T_ini = T = 20*np.exp(3.0*z)
+t_solution = 5*1800.0 #s
+
+height = 0.10 # m
+dz = 0.01
+z = np.arange(0, -(height +dz), -dz)
+g = np.ones(len(z))
+
+#T_ini = T = 20*np.exp(3.0*z)
 T_ini = 10*g
 initial_state =  {'volumetric_water_content': 0.15*g,
                   'volumetric_ice_content': 0.0*g,
                   'temperature': T_ini}
 
+# pleurozium
+para = {'porosity': 0.98,
+        'pF': {'ThetaS': 0.17, 'ThetaR': 0.026, 
+               'alpha': 0.13, 'n': 2.17, 'l': -2.37},
+        'Ksat': 1.2e-5,
+        'freezing_curve': 0.25,
+        'albedo': 0.15,
+        'emissivity': 0.98,
+        'zref': 0.2 # 1st node above ground
+        }
+
+# conductivities
+decay = np.exp(30*z)
+Kvf = 1000 * MOLECULAR_DIFFUSIVITY_H2O * decay
+Ktf = 1000 * THERMAL_DIFFUSIVITY_AIR * decay
+Ktf[-2:] = THERMAL_DIFFUSIVITY_AIR
+para.update({'Kvf': Kvf, 'Ktf': Ktf})
+
 rh = 0.5
-c_vap = rh* saturation_vapor_density(20.0)
+c_vap = rh * saturation_vapor_density(10.0)
 dz_soil = 0.01
 Ksoil = 0.5 # Wm-1K-1
 gsoil = 0.5 / dz_soil # Wm-2K-1
 
-forcing = {'Ta': 10.0, 'ust': 0.001, 'hsoil': -0.1, 'Tsoil': 5.0,
-           'SWdn': 200.0, 'LWdn': 100.0, 'c_vap': c_vap, 'Gsurf': 0.0}
+forcing = {'Ta': 10.0, 'ust': 0.01, 'hsoil': 0.0, 'Tsoil': 5.0,
+           'SWdn': 0.0, 'LWdn': 250.0, 'c_vap': c_vap, 'Gsurf': -30.0}
 
-#%%
+#%
 from moss.heat_water import water_heat_flow
 fluxes, states, dto = water_heat_flow(t_solution, z, initial_state, forcing, para, steps=10)
 
+#%%
+""" Test moss flow """
+from canopy.moss_flow import closure_model_U_moss
+from canopy.canopy_asl_flow import closure_1_model_U
+LAI = 4.0
+zmax = 0.2
+hc = 0.10
+dz = 0.01
+zgrid = np.arange(0, zmax+dz, dz )
+N = len(zgrid)
+
+#shoot area density profile
+a = np.zeros(N)
+ix = np.where(zgrid <hc) [0]
+a[ix] = 1.0
+a = a / sum(a*dz)
+lad = LAI * a
+del a
+
+Utop = 0.1
+Ubot = 0.0
+
+tau, U, Km, l_mix = closure_model_U_moss(zgrid, lad, hc, Utop, Ubot, lbc_flux=0.0, U_ini=None)
+
+#tau, U, Km, l_mix, d, zo = closure_1_model_U(zgrid, 0.2, lad, hc, Utop, Ubot, dPdx=0.0, lbc_flux=None, U_ini=None)
 #%%
 
 #    pF = parameters['pF']
