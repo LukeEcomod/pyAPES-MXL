@@ -630,12 +630,14 @@ def canopy_sw_Spitters(LAIz, Clump, x, ZEN, IbSky, IdSky, LeafAlbedo, SoilAlbedo
     AUTHOR:
         Samuli Launiainen, METLA 1/2011-4/2014 (converted to Python 16.04.2014)
     """
+    print('spitters')
     # --- check inputs and create local variables
     IbSky = max(IbSky, 0.0001)
     IdSky = max(IdSky, 0.0001)
 
     L = Clump*LAIz  # effective layerwise LAI (or PAI) in original grid
-    Lcum = np.flipud(np.cumsum(np.flipud(L), 0.0))  # cumulative plant area from the sky, index 0 = ground
+    print(L)
+    Lcum = np.flipud(np.cumsum(np.flipud(L), 0))  # cumulative plant area from the sky, index 0 = ground
     LAI = max(Lcum)
     #N = np.size(L, 0)  # Nr of layers
     # print L,Lcum

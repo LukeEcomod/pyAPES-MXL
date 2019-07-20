@@ -19,110 +19,92 @@ from canopy.constants import EPS, SPECIFIC_HEAT_AIR, VON_KARMAN, MOLECULAR_DIFFU
                        AIR_VISCOSITY, MOLAR_MASS_AIR, GRAVITY
 #from .constants import *
 
-class Micromet(object):
+class MossFlow(object):
     r""" Computes flow and scalar profiles within canopy.
     """
-    def __init__(self, z, lad, hc, p):
+    def __init__(self, z, lad, para, utop, ubot=0.0):
         r""" Initializes object for computation of flow and scalar profiles within canopy.
 
         Args:
-            z (array): canopy model nodes; equidistant; height from soil surface (= 0.0) [m]
-            lad (array): leaf area density [m2 m-3]
-            hc (float): canopy heigth [m]
-            p (dict):
-                'zos': forest floor roughness length [m]
-                'dPdx': horizontal pressure gradient
-                'Cd': drag coefficient
-                'Utop': Upper boundary [m/s]
-                'Ubot': lower boundary [m/s]
-                'Sc' (dict): {'T','H2O','CO2'} Schmidt numbers
+            zc - grid
+            ladc - leaf-area density [m2m-3]
+            Sc - scalar Schmidt number [-]
+            'Utop': Upper boundary [m/s]
+            'Ubot': lower boundary [m/s]
+            gam (float): weight of new values in iterative solution of scalar profiles
         Returns:
             self (object)
         NOTE: this assumes now that Utop and Ubot given to model are dimensionless [ms-1]
         """
+        
+        # grid
+        dz = z[1] - z[0]
+        self.z = np.arange(0, para['zref'] + dz, dz)  # grid [m] above ground
+        self.dz = self.z[1] - self.z[0]  # gridsize [m]
+        self.Nlayers = len(self.z)
+        self.ones = np.ones(self.Nlayers)  # dummy
+        self.hc = z[-1] # moss canopy height
+        
+        self.canopy_nodes = np.where(lad > 0)[0]
 
-        # parameters
-        #self.zos = p['zos']  # ground roughness length [m]
-        self.Cd = p['Cd']  # drag coefficient
-        self.Utop = p['Utop']  # wind speed at top boundary [ms-1]
-        self.Ubot = p['Ubot']  # wind speed at lwer boundary [ms-1]
-        self.Sc = p['Sc']  # Schmidt numbers
-        self.dPdx = p['dPdx']  # horizontal pressure gradient
-        
-        # grid       
-        self.z = z
-        self.dz = z[1] - z[0] # step: must be continuous
-        self.N = len(z) # number of nodes belonging to canopy model.
-        
-        # state variables
-        self.U = None # mean velocity profile
-        self.Km = None # eddy diffusivity
-        self.tau = None # reynolds stress profile
-        self.ust = None # friction velocity profile
-        
-        self.d = None # zero-place displacement height (m)
-        self.zo = None # roughness length for momentum (m)
-
+        # moss canopy properties 
+        self.lad = np.zeros(len(self.z))
+        print(self.canopy_nodes, self.lad, lad)
+        self.lad[self.canopy_nodes] = lad
+        self.Sc = para['Sc']  # Schmidt number   
+    
+        self.gam = para['gam']
+             
         # initialize state variables
-        self.tau, self.U, self.Km, self.l_mix, self.d, self.zo = closure_1_model_U(
-                z, self.Cd, lad, hc, self.Utop + EPS, self.Ubot + EPS, dPdx=self.dPdx)
+        self.taun, self.Un, self.Kmn, self.l_mix = closure_model_U_moss(
+                self.z, self.lad, self.hc, utop + EPS, ubot + EPS)
         
-        self.ust = np.abs(self.tau)**0.5
+        self.U = None
+        self.Km = None
+        self.Ks = None
+        self.ust = None
         
-    def flow_stats(self, z, lad, hc, Utop, Ubot=None):
-        r""" Computes mean velocity profile, shear stress and
-        eddy diffusivity within and above horizontally homogenous plant
-        canopies using 1st order closure.
-
+        self.profiles = None
+        
+    def update_state(self, ustaro):
+        r""" Updates wind speed and eddy diffusivity profile.
         Args:
-            z (array): nodes, height from soil surface (= 0.0) [m]
-            lad (array): leaf area density [m2 m-3]
-            hc (float): canopy heigth [m]
-            Utop (float): U/ustar [-]
-            ust0 (float): ustar at top; give if Utop & Ubot are normalized
+            ustaro (float): friction velocity at highest grid point [m s-1]
+        Updates un-normalized state variables (self.U, self.Km)
+        Returns:
+            U [ms-1]
+            ustar [ms-1]
         """
+
+        U = self.Un * ustaro + EPS
+        U[0] = U[1]
+        self.U = U
         
-        # pad lad with zeros to account for growing z
-        n = len(z)
-        m = len(lad)
-        if n > m:
-            lad = np.pad(lad, (0,n - m), mode='constant', constant_values=[0])
-        del n, m
+        Km = self.Kmn * ustaro + EPS
+        Km[0] = Km[1]
+        self.Km = Km
+        self.Ks = self.Km * self.Sc
         
-        if Ubot:
-            self.Ubot = Ubot
-            
-        tau, U, Km, l_mix, _, _ = closure_1_model_U(
-                z, self.Cd, lad, hc, Utop + EPS, self.Ubot, dPdx=self.dPdx, U_ini=None)
+        ustar = np.sqrt(abs(self.taun)*ustaro**2)
 
-        if any(U < 0.0):
-            logger.debug('Negative U !!!')
+        return U, ustar
 
-        else:
-            self.z = z.copy()
-            self.l_mix = l_mix.copy()
-            self.U = U.copy()
-            self.Km = Km.copy()
-            self.tau = tau.copy()
-            self.ust = np.abs(self.tau)**0.5
-            
-        # outputs to canopy model:
-        return self.U[0:self.N], self.ust[0:self.N]
-
-
-    def scalar_profiles(self, gam, H2O, CO2, T, P, source, lbc, Ebal):
+    def scalar_profiles(self, initial_profile, source, P, lbc):
         r""" Solves scalar profiles (H2O, CO2 and T) within canopy.
-
+    
         Args:
+            dz (float): grid size [m]
+            Ks (array): scalar diffusivity [m2s-1]
             gam (float): weight for new value in iterations
-            H2O (array): water vapor mixing ratio [mol mol-1]
-            CO2 (array): carbon dioxide mixing ratio [ppm]
-            T (array): ambient air temperature [degC]
-            P: ambient pressure [Pa]
+            initial_profile (dict): initial scalar profiles
+                'H2O' (array): water vapor mixing ratio [mol mol-1]
+                'T' (array): ambient air temperature [degC]
+                # 'CO2' (array): carbon dioxide mixing ratio [ppm]
             source (dict):
                 'H2O' (array): water vapor source [mol m-3 s-1]
-                'CO2' (array): carbon dioxide source [umol m-3 s-1]
                 'T' (array): heat source [W m-3]
+                #'CO2' (array): carbon dioxide source [umol m-3 s-1]
+            P: ambient pressure [Pa]
             lbc (dict):
                 'H2O' (float): water vapor lower boundary [mol m-2 s-1]
                 'CO2' (float): carbon dioxide lower boundary [umol m-2 s-1]
@@ -133,71 +115,75 @@ class Micromet(object):
             T (array): ambient air temperature [degC]
             err_h2o, err_co2, err_t (floats): maximum error for each scalar
         """
-
-        # previous guess, not values of previous time step!
-        H2O_prev = H2O.copy()
-        CO2_prev = CO2.copy()
-        T_prev = T.copy()
-
+    
+        # initial values
+        H2Oprev = initial_profile['H2O'].copy()
+        Tprev = initial_profile['T'].copy()
+        
+        # pad source with zeros if len does not match Nlayers
+        for key in source:
+            m = len(source[key])
+            if m < self.Nlayers:
+                source[key] = np.pad(source[key], (0, self.Nlayers - m), mode='constant', constant_values=[0])
+               
         # --- H2O ---
         H2O = closure_1_model_scalar(dz=self.dz,
-                                     Ks=self.Km * self.Sc['H2O'],
-                                     source=source['h2o'],
-                                     ubc=H2O[-1],
+                                     Ks=self.Ks,
+                                     source=source['H2O'],
+                                     ubc=H2Oprev[-1],
                                      lbc=lbc['H2O'],
                                      scalar='H2O',
-                                     T=T[-1], P=P)
+                                     T=Tprev[-1], P=P)
         # new H2O
-        H2O = (1 - gam) * H2O_prev + gam * H2O
+        H2O = (1 - self.gam) * H2Oprev + self.gam * H2O
         # limit change to +/- 10%
         if all(~np.isnan(H2O)):
-            H2O[H2O > H2O_prev] = np.minimum(H2O_prev[H2O > H2O_prev] * 1.1, H2O[H2O > H2O_prev])
-            H2O[H2O < H2O_prev] = np.maximum(H2O_prev[H2O < H2O_prev] * 0.9, H2O[H2O < H2O_prev])
-        # relative error
-        err_h2o = max(abs((H2O - H2O_prev) / H2O_prev))
+            H2O[H2O > H2Oprev] = np.minimum(H2Oprev[H2O > H2Oprev] * 1.1, H2O[H2O > H2Oprev])
+            H2O[H2O < H2Oprev] = np.maximum(H2Oprev[H2O < H2Oprev] * 0.9, H2O[H2O < H2Oprev])
 
-        # --- CO2 ---
-        CO2 = closure_1_model_scalar(dz=self.dz,
-                                     Ks=self.Km * self.Sc['CO2'],
-                                     source=source['co2'],
-                                     ubc=CO2[-1],
-                                     lbc=lbc['CO2'],
-                                     scalar='CO2',
-                                     T=T[-1], P=P)
-        # new CO2
-        CO2 = (1 - gam) * CO2_prev + gam * CO2
+        # relative error
+        err_h2o = max(abs((H2O - H2Oprev) / H2Oprev))
+    
+        # --- T ---
+        T = closure_1_model_scalar(dz=self.dz,
+                                   Ks=self.Ks,
+                                   source=source['heat'],
+                                   ubc=Tprev[-1],
+                                   lbc=lbc['heat'],
+                                   scalar='T',
+                                   T=Tprev[-1], P=P)
+        # new T
+        T = (1 - self.gam) * Tprev + self.gam * T
+        # limit change to T_prev +/- 2degC
+        if all(~np.isnan(T)):
+            T[T > Tprev] = np.minimum(Tprev[T > Tprev] + 2.0, T[T > Tprev])
+            T[T < Tprev] = np.maximum(Tprev[T < Tprev] - 2.0, T[T < Tprev])
+    
+        # absolut error
+        err_t = max(abs((T - Tprev) / Tprev))
         
-        # limit change to +/- 10%
-        if all(~np.isnan(CO2)):
-            CO2[CO2 > CO2_prev] = np.minimum(CO2_prev[CO2 > CO2_prev] * 1.1, CO2[CO2 > CO2_prev])
-            CO2[CO2 < CO2_prev] = np.maximum(CO2_prev[CO2 < CO2_prev] * 0.9, CO2[CO2 < CO2_prev])
-        # relative error
-        err_co2 = max(abs((CO2 - CO2_prev) / CO2_prev))
-
-        if Ebal:
-            # --- T ---
-            T = closure_1_model_scalar(dz=self.dz,
-                                       Ks=self.Km * self.Sc['T'],
-                                       source=source['sensible_heat'],
-                                       ubc=T[-1],
-                                       lbc=lbc['T'],
-                                       scalar='T',
-                                       T=T[-1], P=P)
-            # new T
-            T = (1 - gam) * T_prev + gam * T
-            # limit change to T_prev +/- 2degC
-            if all(~np.isnan(T)):
-                T[T > T_prev] = np.minimum(T_prev[T > T_prev] + 2.0, T[T > T_prev])
-                T[T < T_prev] = np.maximum(T_prev[T < T_prev] - 2.0, T[T < T_prev])
-
-            # absolut error
-            err_t = max(abs(T - T_prev))
-        else:
-            err_t = 0.0
-                    
-        return H2O, CO2, T, err_h2o, err_co2, err_t
+    #    if 'CO2' in source:
+    #        CO2prev = initial_profile['CO2'].copy()        
+    #        CO2 = closure_1_model_scalar(dz=self.dz,
+    #                                     Ks=self.Ks,
+    #                                     source=source['CO2'],
+    #                                     ubc=CO2prev[-1],
+    #                                     lbc=lbc['CO2'],
+    #                                     scalar='CO2',
+    #                                     T=Tprev[-1], P=P)
+    #        # new CO2
+    #        CO2 = (1 - self.gam) * CO2prev + self.gam * CO2
+    #        
+    #        # limit change to +/- 10%
+    #        if all(~np.isnan(CO2)):
+    #            CO2[CO2 > CO2prev] = np.minimum(CO2prev[CO2 > CO2prev] * 1.1, CO2[CO2 > CO2prev])
+    #            CO2[CO2 < CO2prev] = np.maximum(CO2prev[CO2 < CO2prev] * 0.9, CO2[CO2 < CO2prev])
+    #        
+    #        # relative error
+    #        err_co2 = max(abs((CO2 - CO2prev) / CO2prev))
+        
+        return H2O, T, err_h2o, err_t #, CO2, err_co2
             
-
 
 def closure_model_U_moss(z, lad, hc, Utop, Ubot, lbc_flux=None, U_ini=None):
     """
@@ -205,22 +191,21 @@ def closure_model_U_moss(z, lad, hc, Utop, Ubot, lbc_flux=None, U_ini=None):
     using 1st order closure.
     IN:
        z - grid (m), constant increments
-       Cd - drag coefficient (0.1-0.3) (-)
        lad - shoot area density, 1-sided (m2m-3)
        hc - canopy height (m)
        Utop - U or U /u* upper boundary
        Uhi - U or U /u* at ground (0.0 for no-slip)
     OUT:
-       tau - reynolds stress ([m2s-2] or[ms-1]) 
+       tau - reynolds stress (m2s-2 or ms-1) 
        U - mean wind speed (m/s or -) 
-       Km - eddy diffusivity for momentum ([m2s-1] or [m]) 
+       Km - eddy diffusivity for momentum (m2s-1 or m) 
        l_mix - mixing length (m)
        d - zero-plane displacement height (m)
        zo - roughness lenght for momentum (m)
     
     NOTE:
         inputs Utop and Ubot can be either dimensional [ms-1] or U/ust [-]
-        this will change only units in outputs.
+        this will change only units of outputs.
     """
     
     def drag_coefficient(U, l, p):
@@ -338,7 +323,7 @@ def closure_model_U_moss(z, lad, hc, Utop, Ubot, lbc_flux=None, U_ini=None):
     tau = tau # shear stress
  
     y = forward_diff(U, dz)
-    Kmr = l_mix**2 * abs(y)  # momentum diffusivity m2s-1
+    Kmr = l_mix**2 * abs(y)  # momentum diffusivity
     Km = smooth(Kmr, nn1)
     Km[0] = Km[1]
     tau = smooth(tau, nn1)
@@ -353,8 +338,8 @@ def closure_model_U_moss(z, lad, hc, Utop, Ubot, lbc_flux=None, U_ini=None):
 
     return tau, U, Km, l_mix
 
-def closure_1_model_scalar(dz, Ks, source, ubc, lbc, scalar,
-                           T=20.0, P=101300.0, lbc_dirchlet=False):
+def closure_1_model_scalar(dz, Ks, source, ubc, lbc, scalar, T=20.0, P=101300.0,
+                           lbc_dirchlet=False):
     r""" Solves stationary scalar profiles in 1-D grid
     Args:
         dz (float): grid size (m)

@@ -372,7 +372,7 @@ def waterFlow1D(t_final, grid, forcing, initial_state, pF, Ksat,
             elif lbc['type'] == 'impermeable':
                 q_bot = 0.0
             elif lbc['type'] == 'flux':
-                q_bot = np.sign(lbc['value']) * min(lbc['value'], KLh[-1] * cosalfa)
+                q_bot = np.sign(lbc['value']) * min(abs(lbc['value']), KLh[-1] * cosalfa)
             elif lbc['type'] == 'head':
                 h_bot = lbc['value']
                 # approximate flux to calculate Qin
@@ -581,7 +581,6 @@ def waterFlow1D(t_final, grid, forcing, initial_state, pF, Ksat,
         dt = min(dt, t_final-t)
 
     """ time stepping loop ends """
-
     # get ground water depth
     gwl = get_gwl(h, z)
 

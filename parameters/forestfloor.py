@@ -141,11 +141,11 @@ litter = {
 Pleurozium = {
         "species": "Pleurozium schreberi",  # (Brid.) Mitt.
         "ground_coverage": 0.0,
-        "height": 0.095,  # Soudziloskaia et al (2013)
+        "height": 0.095,  # m, Soudziloskaia et al (2013)
         "roughness_height": 0.01,
         "leaf_area_index": 1.212,
         "specific_leaf_area": 262.1,  # Bond-Lamberty and Gower (2007)
-        "bulk_density": 17.1,  # Soudziloskaia et al (2013)
+        "bulk_density": 17.1,  # kg m-3 Soudziloskaia et al (2013)
         "max_water_content": 10.0,
         "min_water_content": 1.5,
         "porosity": 0.98,

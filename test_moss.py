@@ -93,7 +93,7 @@ Kvap = para['Kvf']*g
 E, c_vap = solve_vapor(z, h, T, Kvap, ctop)
 
 #%%
-t_solution = 5*1800.0 #s
+t_solution = 10*1800.0 #s
 
 height = 0.10 # m
 dz = 0.01
@@ -102,7 +102,7 @@ g = np.ones(len(z))
 
 #T_ini = T = 20*np.exp(3.0*z)
 T_ini = 10*g
-initial_state =  {'volumetric_water_content': 0.15*g,
+initial_state =  {'volumetric_water_content': 0.10*g,
                   'volumetric_ice_content': 0.0*g,
                   'temperature': T_ini}
 
@@ -110,7 +110,7 @@ initial_state =  {'volumetric_water_content': 0.15*g,
 para = {'porosity': 0.98,
         'pF': {'ThetaS': 0.17, 'ThetaR': 0.026, 
                'alpha': 0.13, 'n': 2.17, 'l': -2.37},
-        'Ksat': 1.2e-5,
+        'Ksat': 1.2e-8,
         'freezing_curve': 0.25,
         'albedo': 0.15,
         'emissivity': 0.98,
@@ -131,11 +131,13 @@ Ksoil = 0.5 # Wm-1K-1
 gsoil = 0.5 / dz_soil # Wm-2K-1
 
 forcing = {'Ta': 10.0, 'ust': 0.01, 'hsoil': 0.0, 'Tsoil': 5.0,
-           'SWdn': 0.0, 'LWdn': 250.0, 'c_vap': c_vap, 'Gsurf': -30.0}
+           'SWdn': 1500.0, 'LWdn': 250.0, 'c_vap': c_vap, 'Gsurf': -0.0}
 
 #%
-from moss.heat_water import water_heat_flow
-fluxes, states, dto = water_heat_flow(t_solution, z, initial_state, forcing, para, steps=10)
+from moss.heat_water import water_heat_flow, water_flow, hydraulic_conductivity
+#fluxes, states, dto = water_heat_flow(t_solution, z, initial_state, forcing, para, steps=10)
+
+fluxes, states, dto = water_flow(t_solution, z, initial_state, forcing, para, steps=10)
 
 #%%
 """ Test moss flow """

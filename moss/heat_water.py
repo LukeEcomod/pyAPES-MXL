@@ -443,6 +443,315 @@ def water_heat_flow(t_final, z, initial_state, forcing, parameters, steps=10):
     
     return fluxes, states, dto
 
+
+def water_flow(t_final, z, initial_state, forcing, parameters, steps=10):
+    
+    r""" Solves liquid water flow in 1-D using implicit, backward finite difference
+    solution of Richard's equation.
+
+    Args:
+        t_final (float): solution timestep [s]
+        grid (dict):
+            'z': node elevations, top surface = 0.0 [m]
+            'dz': thickness of computational layers [m]
+            'dzu': distance to upper node [m]
+            'dzl': distance to lower node [m]
+        forcing (dict):
+            q_sink (array): sink term from layers, e.g. evaporation sink [m3 m-3 s-1]
+            #q_source (array): source due to rainfall interception per layer [m3 m-3 s-1]
+        initial_state (dict):
+            'water_potential': initial water potential [m]
+            'volumetric_water_content' [m3 m-3]
+            'volumetric_ice_content' [m3 m-3]
+            'temperature' [degC]
+        pF (dict): water retention parameters (van Genuchten)
+            'ThetaS' (array): saturated water content [m\ :sup:`3` m\ :sup:`-3`\ ]
+            'ThetaR' (array):residual water content [m\ :sup:`3` m\ :sup:`-3`\ ]
+            'alpha' (array):air entry suction [cm\ :sup:`-1`]
+            'n' (array):pore size distribution [-]
+            'l' (array): pore connectivity
+        Ksat (array): saturated hydraulic conductivity [m s-1]
+
+        steps (int): initial number of subtimesteps used to proceed to 't_final'
+    Returns:
+        fluxes (dict): [m s-1]
+            'evaporation'
+            'drainage'
+            'water_closure'
+        state (dict):
+            'water_potential': [m]
+            'volumetric_water_content': [m3 m-3]
+            'ground_water_level': [m]
+            'pond_storage': [m]
+        dto (float): timestep used for solving [s]
+
+    References:
+        vanDam & Feddes (2000): Numerical simulation of infiltration, evaporation and shallow
+        groundwater levels with the Richards equation, J.Hydrol 233, 72-85.
+
+    """
+    global N, dz, dz2, pF, poros
+    
+    N = len(z) # zero at moss canopy top, z<= 0, constant steps
+    dz = z[0] - z[1]
+    print('dz', dz)
+    dz2 = dz**2
+    
+    # initial and computational time step [s]
+    dto = t_final / steps
+    dt = dto # adjusted during solution
+    dt_min = 0.1 # minimum timestep
+    
+    # convergence criteria
+    crit_W = 1.0e-4  # moisture [m3 m-3] 
+    crit_h = 1.0e-5  # head [m]
+    
+    pF = parameters['pF']
+    Ksat = parameters['Ksat']
+    fp = parameters['freezing_curve']
+    #poros = parameters['porosity']
+    
+           
+    # cumulative fluxes for 0...t_final
+    Evap = 0.0
+    LEcum = 0.0
+    Q_bot = 0.0
+    Q_top = 0.0
+    Eflx = np.zeros(N)
+    
+    # initial state    
+    T_ini = initial_state['temperature']
+    W_tot = initial_state['volumetric_water_content'] + initial_state['volumetric_ice_content']
+
+    # Liquid and ice content, and dWliq/dTs
+    W_ini, Wice_ini, gamma = frozen_water(T_ini, W_tot, fp=fp)
+    h_ini = water_retention(pF, theta=W_ini) # h [m]
+    del W_tot
+    
+    """ solve for t =[0; t_final] using implict iterative scheme """
+    
+    # variables updated during solution
+    W = W_ini.copy()
+    #Wice = Wice_ini.copy()
+    h = h_ini.copy()
+    #T = T_ini.copy()
+    
+    t = 0.0
+    while t < t_final:
+        # solution of previous timestep
+        h_old = h.copy()
+        W_old = W.copy()
+        #Wice_old = Wice.copy()
+
+
+        # state variables updated during iteration of time step dt
+        h_iter = h.copy()
+        W_iter = W.copy()
+        #Wice_iter = Wice.copy()
+
+        del h, W
+        
+        # hydraulic condictivity [m s-1 = kg m-2 s-1]
+        #KLh = hydraulic_conductivity(pF, W_old, Ksat=Ksat)
+        #KLh = spatial_average(KLh, method='arithmetic')
+        KLh = np.ones(N)*Ksat
+        # take bottom boundary condition for water flow from previous timestep
+        q_bot = -KLh[-1] * ((h_old[-1] - forcing['hsoil']) / dz + 1)
+        q_bot = 0.0
+        
+
+        #--- solve vapor phase and return E [kg m-3 s-1] & c_vap[kg m-3]
+        #E, c_vap = solve_vapor(h_iter, T_iter, Kvap, ubc=forcing['c_vap'], zref=parameters['zref'])
+        #E = np.zeros(N)
+        
+        # initiate iteration over dt
+        err_h = 999.0
+        err_W = 999.0
+        #err_Wice = 999.0
+        iterNo = 0
+        
+        while (err_h > crit_h or err_W > crit_W): # or err_Wice > crit_Wice or err_T > crit_T):
+
+            iterNo += 1
+            #print(t)
+            # previous iteration values
+            h_iter0 = h_iter.copy()                                      
+            W_iter0 = W_iter.copy()
+            #Wice_iter0 = Wice_iter.copy() 
+            
+            E = np.zeros(N)
+            
+            # solve liquid water flow
+            S = 1e-3 * E # evaporation / condensation [s-1]
+            # add here constraint that Ew <= (theta - theta_r) / dt
+            f = np.where((W_iter - pF['ThetaR'] - 10*EPS)/dt - S <= 0)[0]
+            if len(f) >0:
+                print(f)
+            E[f] = 0.0
+            S[f] = 0.0
+            del f
+            q_top = 0.0
+            #h_iter, W_iter = solve_liquid(dt, h_iter, W_iter, W_old, KLh, S=Ew, q_top=0.0, q_bot=q_bot)
+            
+            # differential water capacity [m-1]
+            C = diff_wcapa(pF, h_iter)    
+        
+            """ set up tridiagonal matrix """
+            a = np.zeros(N)  # sub diagonal
+            b = np.zeros(N)  # diagonal
+            g = np.zeros(N)  # super diag
+            f = np.zeros(N)  # rhs
+        
+            # intermediate nodes i=1...N-1
+            b[1:-1] = C[1:-1] + dt / dz2 * (KLh[1:N-1] + KLh[2:N])
+            a[1:-1] = - dt / dz2 * KLh[1:N-1]
+            g[1:-1] = - dt / dz2 * KLh[2:N]
+            f[1:-1] = C[1:-1] * h_iter[1:-1] - (W_iter[1:-1] - W_old[1:-1]) + dt / dz \
+                        * (KLh[1:N-1] - KLh[2:N]) - S[1:-1] * dt
+        
+            # top node i=0 is zero flux
+            b[0] = C[0] + dt / dz2 * KLh[1]
+            a[0] = 0.0
+            g[0] = -dt / dz2 * KLh[1]
+            f[0] = C[0] * h_iter[0] - (W_iter[0] - W_old[0]) + dt / dz \
+                    * (-q_top - KLh[1]) - S[0] * dt
+        
+            # bottom node i=N is prescribed flux
+            b[-1] = C[-1] + dt / dz2 * KLh[N-1]
+            a[-1] = -dt / dz2 * KLh[N-1]
+            g[-1] = 0.0
+            f[-1] = C[-1] * h_iter[-1] - (W_iter[-1] - W_old[-1]) + dt / dz \
+                    * (KLh[N-1] + q_bot) - S[-1] * dt
+            #else:  # head boundary
+            #    h_bot = lbc_liq
+            #    b[-1] = C[-1] + dt / dz2 * (KLh[N-1] + KLh[N])
+            #    a[-1] = - dt / dz2 * KLh[N-1]
+            #    g[-1] = 0.0
+            #    f[-1] = C[-1] * h_iter[-1] - (W_iter[-1] - W_old[-1]) + dt / dz\
+            #            * ((KLh[N-1] - KLh[N]) + KLh[N] / dz * h_bot) - S[-1] * dt
+        
+            # solve new pressure head and corresponding moisture
+            h_iter = thomas(a, b, g, f)
+            W_iter = water_retention(pF, psi=h_iter)
+            
+            #W_iter, Wice_iter, gamma = frozen_water(T_iter, W_iter + Wice_iter, fp=fp)
+            #h_iter = water_retention(pF, theta=W_iter)
+            
+                         
+            # check solution, if problem continue with smaller dt or break
+            if any(abs(h_iter - h_iter0) > 1.0) or any(np.isnan(h_iter)):
+                if dt > dt_min:
+                    dt = max(dt / 3.0, dt_min)
+                    print('(iteration %s) Solution blowing up, retry with dt = %.1f s' %(iterNo, dt))
+                    #print('err_h: %.5f, errW: %.5f, errT: %.5f,, errWice: %.5f' %(err_h, err_W, err_T, err_Wice))
+                    iterNo = 0
+                    h_iter = h_old.copy()
+                    W_iter = W_old.copy()
+                    #Wice_iter = Wice_old.copy()
+                    continue
+                else:  # convergence not reached with dt=30s, break
+                    print('(iteration %s)  No solution found (blow up), h and Wtot set to old values' %(iterNo))
+                    h_iter = h_old.copy()
+                    W_iter = W_old.copy()
+                    #Wice_iter = Wice_old.copy()
+                    break
+
+            # if problems reaching convergence devide time step and retry
+            if iterNo == 20:
+                if dt > dt_min:
+                    dt = max(dt / 3.0, dt_min)
+                    print('iteration %s) More than 20 iterations, retry with dt = %.1f s' %(iterNo, dt))
+                    print('err_h: %.5f, errW: %.5f' %(err_h, err_W))
+                    iterNo = 0
+                    continue
+                else:  # convergence not reached with dt=30s, break
+                    print('(iteration %s) Solution not converging, err_h: %.5f, errW: %.5f: %.5f' 
+                          %(iterNo, err_h, err_W))
+                    break
+
+            # errors for determining convergence
+            err_h = max(abs(h_iter - h_iter0))
+            err_W = max(abs(W_iter - W_iter0))
+            #err_Wice = max(abs(Wice_iter - Wice_iter0))
+
+        # end of iteration loop
+            
+        # new state
+        h = h_iter.copy()
+        W = W_iter.copy()
+        #Wice = Wice_iter.copy()
+        
+        del h_iter, W_iter
+
+        # cumulative fluxes over integration time
+        Q_bot += q_bot * dt
+        Q_top += E[0] * dt
+        Evap += sum(S*dz)*dt
+        #LEcum += sum(LE*dz)*dt
+        #G_top += ubc_h[1] * dt
+        #G_bot += lbc_h[1] * dt
+
+        
+        Eflx += S*dt
+
+        # solution time and new timestep
+        t += dt
+
+        dt_old = dt  # save temporarily
+        # select new time step based on convergence
+        if iterNo <= 3:
+            dt = dt * 2
+        elif iterNo >= 6:
+            dt = dt / 2
+        # limit to minimum of 30s
+        dt = max(dt, dt_min)
+        
+#        # save dto for output to be used in next run
+        if dt_old == t_final or t_final > t:
+            dto = min(dt, t_final)
+        # limit by time left to solve
+        dt = min(dt, t_final-t)
+
+        print(t)
+        
+        # fig
+        plt.figure(100)
+        plt.subplot(221); plt.plot(E, z); plt.title('E')
+        plt.subplot(222); plt.plot(h, z); plt.title('head')
+        plt.subplot(223); plt.plot(W, z); plt.title('theta')
+
+    """ time loop ends """
+
+    Wice = Wice_ini.copy()
+    # mass balance error [m]
+    mbe = (sum(W_ini + Wice_ini) - sum(W + Wice))*dz + Q_bot + Evap
+    
+    
+    
+    fluxes = {'Evap': Evap / t_final,  # evaporation/condensation at surface (kg m-2 s-1)
+              'LE': LEcum / t_final,
+              'Qbot': Q_bot / t_final, # liquid water flow at bottom boundary
+              'mbe': mbe,              # mass balance error (m)
+              'Eflx': Eflx / t_final,
+              }
+    
+    states = {'water_potential': h,
+              'volumetric_water_content': W,
+              'volumetric_ice_content': Wice,
+             }
+    # fig
+#    plt.figure(100)
+#    plt.subplot(221)
+#    plt.plot(c_vap, z)
+#    plt.subplot(222)
+#    plt.plot(T, z)
+#    plt.subplot(223)
+#    plt.plot(E, z)
+#    plt.subplot(224)
+#    plt.plot(h, z)
+    
+    return fluxes, states, dto
+
 # ---- functions to set and solve tridiagonal matrices during iteration---
 
 def solve_liquid(dt, h_iter, W_iter, W_old, KLh, S, q_top, q_bot):
@@ -678,7 +987,11 @@ def hydraulic_conductivity(pF, wliq, Ksat=1.0):
     S = np.minimum(1.0, (w - pF['ThetaR']) / (pF['ThetaS'] - pF['ThetaR']) + EPS)
 
     Kh = Ksat * S**l * (1 - (1 - S**(1/m))**m)**2
-    Kh = np.minimum(Kh, 1e3*EPS)
+    Kh = np.maximum(Kh, 1e3*EPS)
+
+#    plt.figure()
+#    plt.semilogy(S, Kh)
+
     return Kh
 
 def diff_wcapa(pF, h):
