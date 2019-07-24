@@ -156,13 +156,11 @@ class MLM_Moss(object):
         #self.Kwater = hydraulic_conductivity(self.pF, self.Wliq, self.Ksat) #ms-1
         #self.Kheat = thermal_conductivity(self.Wliq, wice=self.Wice) #
         
-        # radiation model object
-        #self.Radiation = MossRadiation(para['radiation'], self.Lz)
         
     def _water_flux_constraints(self, Wliq):
         """ returns available water and available storage space in kg m-2 """
-        available_water = (Wliq - self.pF['theta_r'] - EPS) * self.dz * WATER_DENSITY
-        available_space = (self.pF['theta_s'] - Wliq - EPS) * self.dz * WATER_DENSITY
+        available_water = (Wliq - self.pF['theta_r'] - 2*EPS) * self.dz * WATER_DENSITY
+        available_space = (self.pF['theta_s'] - Wliq - 2*EPS) * self.dz * WATER_DENSITY
         
         return available_water, available_space
     
@@ -213,10 +211,17 @@ class MLM_Moss(object):
                 'hydraulic_conductivity': [m s\ :sup:`-1`\ ] properties of first soil node
                 'depth': [m] properties of first soil node
         """
+        gam = 0.5
+        
+        # moss layer initial state
+        #initial_state = {'Ts': self.T.copy(), 'Wliq': self.Wliq.copy(), 'Wice': self.Wice.copy()}
+        
+        heat_lbc = boundary['heat']
+        water_lbc = boundary['water']     
         
         # --- current flow statistics
-        self.Flow.update_state(forcing['friction_velocity'])
-       
+        self.Flow.compute_flow(Utop=forcing['wind_speed'], Ubot=0.0)
+
         # --- compute SW radiation within canopy ---
         sw_forcing = {'zenith_angle': forcing['zenith_angle'],
                       'dir_par': forcing['dir_par'],
@@ -230,35 +235,43 @@ class MLM_Moss(object):
         
         # --- iterative solution of H2O, T, and Ts within canopy air space ---
 
-        max_errT = 0.01  # maximum error
-        max_errh2o = 0.01
-        max_iter = 50 #50  # maximum iterations
-        err_T, err_h2o, err_Ts= 999., 999., 999.
+        max_errT = 0.0001  # relativeerror
+        max_errh2o = 0.0001 # relative error
+        max_errTs = 0.001 # degC
+        
+        max_iter = 500 #50  # maximum iterations
+        err_T, err_h2o, err_Ts = 999., 999., 999.
 
         # initialize air-space state variables
-        #T, H2O, CO2 = self._restore_scalar_profiles(forcing)
+        T, H2O, CO2 = self._restore_scalar_profiles(forcing)
         
-        # initial profiles from last timestep
-        if self.Flow.profiles is None:
-            T, H2O, CO2 = self._restore_scalar_profiles(forcing)
-            self.Flow.profiles = {'T': T, 'H2O': H2O}
+        # initial profile shape taken from last timestep
+        #if self.Flow.profiles is None:
+        #    T, H2O, CO2 = self._restore_scalar_profiles(forcing)
+        #    self.Flow.profiles = {'T': T, 'H2O': H2O}
 
-        T = self.Flow.profiles['T']
-        H2O = self.Flow.profiles['H2O']
+        #T = self.Flow.profiles['T'] / self.Flow.profiles['T'][-1] * forcing['air_temperature']
+        #H2O = self.Flow.profiles['H2O'] / self.Flow.profiles['H2O'][-1] * forcing['h2o']
         
-        Ts0 = self.T.copy()
-        Wliq0 = self.Wliq.copy()
-        Wice0 = self.Wice.copy()        
+        Ts0 = self.T.copy()   
         Ts = Ts0.copy()
-
+        S0 = {'heat': np.zeros(self.Nlayers), 'H2O': np.zeros(self.Nlayers)}
+        
+        # for analyzing behavior
+        Tres = []
+        qres = []
+        Hres = []
+        LEres = []
+        Tsres = []
+        
         iter_no = 0
-        while (err_T > max_errT or err_h2o > max_errh2o) and iter_no <= max_iter:
+        while (err_T > max_errT or err_h2o > max_errh2o or err_Ts > max_errTs) and iter_no <= max_iter:
 
             iter_no += 1
             
             Told = T.copy()
             H2Oold = H2O.copy()
-            #Tsold = Ts.copy()
+            Tsold = Ts.copy()
  
             # solve long-wave
             lw_forcing = {'lw_in': forcing['lw_in'],
@@ -269,79 +282,114 @@ class MLM_Moss(object):
             LWabs, LWdn, LWup, gr = self.Radiation.lw_profiles(lw_forcing)
             del lw_forcing
             
-            # solve moss energy and water balance      
+            # solve moss energy balance      
             ebal_forcing = {'SWabs': SWabs, 
                             'LWabs': LWabs,
                             'T': T[0:self.Nlayers].copy(),
                             'H2O': H2O[0:self.Nlayers].copy(),
                             'U': self.Flow.U[0:self.Nlayers].copy(),
                             'Pamb': forcing['air_pressure'],
-                            'soil_temperature': 10.0
+                            'Precip': forcing['precipitation'],
+                            #'soil_temperature': forcing['soil_temperature'],
+                            #'lw_in': forcing['lw_in']
                             }
+
+            #heat_lbc = boundary['heat']
+            #water_lbc = boundary['water']
             
-#            heat_lbc = {'type': 'flux', 'value': 0.0}
-#            #water_lbc = {'type': 'flux', 'value': 0.0}
-#            water_lbc = {'type': 'head', 'value': -0.01}
-            #print(lbc)
-            heat_lbc = boundary['heat']
-            water_lbc = boundary['water']
             
-            initial_state = {'Ts': Ts0, 'Wliq': Wliq0, 'Wice': Wice0}
+            #initial_state = {'Ts': self.T.copy(), 'Wliq': self.Wliq.copy(), 'Wice': self.Wice.copy()}
             
-            source, fluxes, state = self.solve_heat_water(dt,
-                                                          ebal_forcing, 
-                                                          initial_state,
-                                                          heat_lbc, water_lbc
-                                                         )
+            source, fluxes, state = self.solve_energybalance(dt,
+                                                              ebal_forcing, 
+                                                              heat_lbc, water_lbc
+                                                              )
             Ts = state['temperature'].copy()
-            err_Ts = 0.0 #np.max(abs(Ts - Tsold))
+            err_Ts = np.max(abs(Ts - Tsold))
             
             # solve air-space profiles
+            initial_profile = {'T': Told, 'H2O': H2Oold}
+            
             lbc = {'heat': 0.0, # heat flux from ground
                    'H2O': 0.0 # water flux from ground
                   }
+            #sink-source profiles average from last 2 iterations to reduce oscillation
             source['H2O'] = source['latent_heat'] / LATENT_HEAT
-            initial_profile = {'T': Told, 'H2O': H2Oold}
+            
+            S = {'heat': S0['heat'] * (1.0 - gam) + source['heat'] * gam,
+                 'H2O': S0['H2O'] * (1.0 - gam) + source['H2O'] *  gam}
+            
+            S0 = S.copy()
             
             H2O, T, err_h2o, err_T = self.Flow.scalar_profiles(initial_profile,
-                                                               source.copy(),
+                                                               S.copy(),
                                                                forcing['air_pressure'],
                                                                lbc)
             
-            #err_t = np.max(abs(H2O - H2Oold))
-            #err_h2o = np.max(abs((H2O - H2Oold) / H2Oold))
-            
-            #print('err_T', err_T < max_errT, 'err_Ts', err_Ts < max_errT, 'err_h2o', err_h2o < max_errh2o, 'itern_no', iter_no)
+            del S
+            Tres.append(T)
+            qres.append(H2O)
+            Hres.append(fluxes['H'])
+            LEres.append(fluxes['LE'])
+            Tsres.append(Ts)
+
+        print('iterNo=', iter_no)
         
-        # plot statistics
-        H2Omoss = state['H2Os']
-        es = 611.0 * np.exp((17.502 * T) / (T + 240.97))  # Pa
-        es = es / forcing['air_pressure'] 
+        # solve moss water flow
+        parameters = {'pF': self.pF,
+                      'Ksat': self.Ksat,
+                      'freezing_curve': self.freezing_curve,
+                      #'porosity': self.porosity
+                      }
+                
+        water_fluxes, state, dto = water_flow(dt, self.z, state, parameters, source['water'], water_lbc, steps=1)
         
-        plt.figure(100)
-        
-        plt.subplot(321); plt.plot(Ts, self.z, '-', T, self.Flow.z, '--'); plt.title('Tmoss and T')
-        plt.subplot(322); plt.plot(state['volumetric_water_content'], self.z, '-'); plt.title('Wliq')
-        plt.subplot(323); plt.plot(source['heat']*self.dz, self.z); plt.title('H')
-        plt.subplot(324); plt.plot(source['latent_heat']*self.dz, self.z); plt.title('LE')
-        plt.subplot(325); plt.plot(H2O, self.Flow.z, '-', H2Omoss, self.z, '--', es, self.Flow.z, ':'); plt.title('H2O')
-        plt.subplot(326); plt.plot(state['volumetric_ice_content'], self.z, '-'); plt.title('Wice')
-        #plt.subplot(326); plt.plot(self.Flow.U, self.Flow.z); plt.title('U')
-        
+
+#        # plot statistics
+#        if iter_no == 51:
+#            print(err_T, err_h2o, err_Ts)
+#            #H2Omoss = state['H2Os']
+#            es = 611.0 * np.exp((17.502 * T) / (T + 240.97))  # Pa
+#            es = es / forcing['air_pressure'] 
+#            
+#            plt.figure()
+#            
+#            for k in np.arange(0, 50):
+##            plt.subplot(321); plt.plot(Ts, self.z, '-', T, self.Flow.z, 'r--'); plt.title('Tmoss and T')
+##            plt.subplot(322); plt.plot(state['volumetric_water_content'], self.z, '-'); plt.title('Wliq')
+##            plt.subplot(323); plt.plot(source['heat']*self.dz, self.z); plt.title('H')
+##            plt.subplot(324); plt.plot(source['latent_heat']*self.dz, self.z); plt.title('LE')
+##            plt.subplot(325); plt.plot(H2O, self.Flow.z, 'r-', H2Omoss, self.z, '--',  es, self.Flow.z, ':'); plt.title('H2O')
+##            plt.subplot(326); plt.plot(state['volumetric_ice_content'], self.z, '-'); plt.title('Wice')
+#                plt.subplot(321); plt.plot(Tsres[k], self.z, '-'); plt.title('Tmoss')
+#                plt.subplot(322); plt.plot(Tres[k], self.Flow.z, '-'); plt.title('Ta')
+#                plt.subplot(323); plt.plot(qres[k], self.Flow.z, '-'); plt.title('qa')
+#                plt.subplot(324); plt.plot(Hres[k], self.z, '-'); plt.title('H')
+#                plt.subplot(325); plt.plot(LEres[k], self.z, '-'); plt.title('LE')
+#            #plt.subplot(326); plt.plot(self.Flow.U, self.Flow.z); plt.title('U')
+       
         # update profiles; initial guess for next dt
-        canopyflx = {'Rnet': np.sum(SWabs + LWabs), 'H': np.sum(source['heat']*self.dz),
-                     'LE': np.sum(source['latent_heat']*self.dz),
-                     'LWabs': LWabs, 'SWabs': SWabs,
-                     'LEz': source['latent_heat']*self.dz,
-                     'Hz': source['heat']*self.dz,
+        canopyflx = {'Rnet': np.sum(SWabs + LWabs),
+                     'H': fluxes['H'],
+                     'LE': fluxes['LE'],
+                     'LWabs': LWabs, # Wm-2 per layer
+                     'SWabs': SWabs, # Wm-2 per layer
+                     'LEz': source['latent_heat']*self.dz, # Wm-2 per layer
+                     'Hz': source['heat']*self.dz, # Wm-2 per layer
+                     'S': source['S']*self.dz, #Wm-2 per layer
+                     'Sadv': source['Sadv']*self.dz, #Wm-2 advective energy 
+                     'Trfall': fluxes['Trfall'], #troughfall [kgm-2 ground]
+                     'Interc': fluxes['Interc'] #interception [kgm-2 ground]
                      }
         self.Flow.profiles = {'H2O': H2O, 'T': T}
+        
         return state, canopyflx, T, H2O
-    
-    def solve_heat_water(self, dt, forcing, initial_state, heat_lbc, water_lbc):
+
+
+    def solve_energybalance(self, dt, forcing, heat_lbc, water_lbc):
         """
         solution of surface energy balance and heat flow in moss
-        NOTE: uses object properties and state variables of water-balance
+        NOTE: uses object properties and state variables as initial conditions
         
         Args:
             self - object
@@ -352,16 +400,17 @@ class MLM_Moss(object):
                 U - flow velocity [ms-1]
                 T - air-space temperature [degC]
                 H2O - air-space humidity [mol mol-1]
-                radiative_conductance [mol m-2 s-1]
-            Ts - moss temperature profile [degC]
-            Wliq - moss liquid water content [m3m-3]
-            Wice - moss ice content [m3m-3]
+            initial_state (dict)
+                Ts - moss temperature profile [degC]
+                Wliq - moss liquid water content [m3m-3]
+                Wice - moss ice content [m3m-3]
+            heat_lbc (dict): lower boundary condition
         Returns:
             S - heat sink/source term [Wm-3]
             E - evaporation / condensation rate [s-1]
             H - sensible heat flux [Wm-2 (ground)]
             LE - latent heat flux [Wm-2 (ground)]
-            F - radiative conductance term [Wm-2 (ground)]
+
         """
         SWabs = forcing['SWabs']
         LWabs = forcing['LWabs']
@@ -369,15 +418,15 @@ class MLM_Moss(object):
         Ta = forcing['T']
         H2Oa = forcing['H2O']
         Pamb = forcing['Pamb']
+        Prec = forcing['Precip']
         
-        Ts0 = initial_state['Ts'].copy()
-        Wliq0 = initial_state['Wliq'].copy()
-        Wice0 = initial_state['Wice'].copy()        
+        Ts = self.T.copy()
+        Wliq = self.Wliq.copy()
+        Wice = self.Wice.copy()        
+        
+        # maximum storage capacity kg m-2 per layer
+        Smax = np.ones(self.Nlayers) * self.pF['theta_s'] * self.dz * WATER_DENSITY
 
-        del initial_state
-        
-        #lw_up = 0.98*STEFAN_BOLTZMANN * (forcing['soil_temperature'] + DEG_TO_KELVIN)**4.0
-        
         # heat and water flow parameters & bc's
         parameters = {'pF': self.pF,
                       'Ksat': self.Ksat,
@@ -385,116 +434,92 @@ class MLM_Moss(object):
                       'porosity': self.porosity}
             
         heat_ubc = {'type': 'flux', 'value': 0.0}
-        #heat_lbc = {'type': 'flux', 'value': 0.0} 
-        #heat_lbc  =  {'type': 'temperature', 'value': forcing['soil_temperature']}
-        
-        #water_ubc = {'type': 'flux', 'value': 0.0}
-        #water_lbc = {'type': 'flux', 'value': 0.0}
         
         # boundary-layer conductance [molm-2s-1]
         gh = 0.135 * np.sqrt(U / self.length_scale) * self.Lz
         gv = 0.147 * np.sqrt(U / self.length_scale) * self.Lz
-        #gr = gr * self.Lz
 
-        dt0 = dt
-        dt = 10.0 #dt0 / 100
-        Ts = Ts0.copy()
-        Wliq = Wliq0.copy()
-        Wice = Wice0.copy()
+        """ intercept rainfall and compute respective heat and water sources """
+        available_water, available_space = self._water_flux_constraints(Wliq) # kgm-2 in layer
         
-        t = 0.0
+        interc = np.zeros(self.Nlayers)
+        adv_heat = np.zeros(self.Nlayers)
         
-        while t < dt0:
-#            # solve long-wave
-#            lw_forcing = {'lw_in': forcing['lw_in'],
-#                          'soil_temperature': Ts[0], #forcing['soil_temperature'],
-#                          'T': Ts
-#                          } 
-#            LWabs, LWdn, LWup, gr = self.Radiation.lw_profiles(lw_forcing)
-            #LWabs = np.zeros(np.shape(self.z))
-            #gr = gr * self.Lz
+        P = Prec * dt  # kg m-2
+        
+        if P > 0:
+            #P = Prec * dt
+            S0 = Wliq * self.dz * WATER_DENSITY
             
-            # surface humidity
-            h = water_retention(self.pF, theta=Wliq) # m
-            rh = relative_humidity(h, Ts) #[-]
+            for n in reversed(range(self.Nlayers)): # start from top
+                interc[n] = (Smax[n] - S0[n]) * (1.0 - np.exp(-P / Smax[n]))
+                P -= interc[n] # kgm-2
 
-            es = 611.0 * np.exp((17.502 * Ts) / (Ts + 240.97))  # Pa
-            es = es / Pamb    
-            H2Os = rh * es # mol/mol
-            
-            #print('h2os', H2Os, 'h2oa', H2Oa)
-            # evaporation / condensation rate
-            E_demand = gv * (H2Os - H2Oa) * MOLAR_MASS_H2O # kgm-2s-1
+        # update available water & space
+        available_water += interc
+        available_space -= interc
+        
 
-            available_water, available_space = self._water_flux_constraints(Wliq) # kgm-2 in layer
-            
-            E = np.maximum(np.minimum(E_demand, 0.9*available_water / dt),
-                           -0.9*available_space / dt) #kgm-2s-1
+        # convert units
+        interc = interc / dt / WATER_DENSITY / self.dz # s-1
+        adv_heat = interc / WATER_DENSITY * CV_WATER * Ta # W m-3
+        
+        """ ------- """
+        
+        # moss surface humidity
+        h = water_retention(self.pF, theta=Wliq) # m
+        rh = relative_humidity(h, Ts) #[-]
 
-            # latent heat of vaporization
-            L = 1e3 * (3147.5 - 2.37 * (Ts + DEG_TO_KELVIN)) # J kg-1
-    
-            # fluxes [Wm-2 (ground) per layer]
-            H = SPECIFIC_HEAT_AIR * gh * (Ts - Ta)
-            # F = SPECIFIC_HEAT_AIR * gr * (Ts - Ta)
-            LE = L * E
-            
-            # heat sink / source term [Wm-2 (ground)]   
-            S = (SWabs + LWabs) - H - LE #- F
-            S = S / self.dz #Wm-3
-            E = E / WATER_DENSITY / self.dz # s-1
-            
-            # solve heat flow
-            initial_state = {'volumetric_water_content': Wliq,
-                             'volumetric_ice_content': Wice,
-                             'temperature': Ts}
-            
-            
-            heat_fluxes, state, _ = heat_flow(dt, self.z, initial_state, parameters, S, heat_lbc, heat_ubc, steps=1)
-            
-            # convergence, then solve water flow
-            #water_fluxes, state, dto = water_flow(dt, self.z, state, parameters, -E, water_lbc)
-            
-            Ts = state['temperature']
-            Wliq = state['volumetric_water_content']
-            Wice = state['volumetric_ice_content']
+        es = 611.0 * np.exp((17.502 * Ts) / (Ts + 240.97))  # Pa
+        es = es / Pamb    
+        H2Os = rh * es # mol/mol
+        
+        # evaporation / condensation rate per layer
+        E_demand = gv * (H2Os - H2Oa) * MOLAR_MASS_H2O # kgm-2s-1
+        
+        E = np.maximum(np.minimum(E_demand, 0.5*available_water / dt),
+                       -0.8*available_space / dt) #kgm-2s-1
 
-            # then solve water flow
-            water_fluxes, state, dto = water_flow(dt, self.z, state, parameters, -E, water_lbc)
-  
-            t += dt
-            #print('t', t)
+        # latent heat of vaporization
+        L = 1e3 * (3147.5 - 2.37 * (Ts + DEG_TO_KELVIN)) # J kg-1
 
-            Ts = state['temperature']
-            Wliq = state['volumetric_water_content']
-            Wice = state['volumetric_ice_content']
-            #initial_state = states.copy()
+        # fluxes [Wm-2 (ground) per layer]
+        H = SPECIFIC_HEAT_AIR * gh * (Ts - Ta)
+        LE = L * E
+        
+        # heat sink / source term [Wm-2 (ground)]   
+        S = (SWabs + LWabs) - H - LE #- F
+        S = S / self.dz #Wm-3 per layer
+        E = E / WATER_DENSITY / self.dz # s-1
+
+        # solve heat flow
+        initial_state = {'volumetric_water_content': Wliq,
+                         'volumetric_ice_content': Wice,
+                         'temperature': Ts}
+        
+        heat_fluxes, state, _ = heat_flow(dt, self.z, initial_state, parameters, S + adv_heat, heat_lbc, heat_ubc, steps=1)
+        
             
-#            plt.figure(1)
-#            plt.subplot(321); plt.plot(Ts, self.z); plt.title('Ts')
-#            plt.subplot(322); plt.plot(Wliq, self.z); plt.title('Wliq')
-#            plt.subplot(323); plt.plot(H, self.z); plt.title('H')
-#            plt.subplot(324); plt.plot(LE, self.z); plt.title('LE')
-#            plt.subplot(325); plt.plot(S*self.dz, self.z); plt.title('Sheat')
-#            plt.subplot(326); plt.plot(SWabs + LWabs, self.z); plt.title('Rnet')
+        # return dicts
+        source = {'S': S, #Wm-3
+                  'Sadv': adv_heat, #Wm-3
+                  'water': -E + interc, # s-1
+                  'heat': H / self.dz, # Wm-3
+                  'latent_heat': LE / self.dz, # Wm-3
+                 }
 
-            # return dicts
-            source = {'H2O': E * WATER_DENSITY * MOLAR_MASS_H2O,
-                      'heat': H / self.dz,
-                      'latent_heat': LE / self.dz,
-                      }
-
-            fluxes = {'heat conduction': heat_fluxes['Fheat'],
-                      'ebe': heat_fluxes['ebe'],
-                      #'water_conduction': water_fluxes['Fwater'],
-                      'Qbot': water_fluxes['Qbot'],
-                      'mbe': water_fluxes['mbe']
-                     }
-            state['H2Os'] = H2Os
-            
+        fluxes = {'heat conduction': heat_fluxes['Fheat'],
+                  'ebe': heat_fluxes['ebe'],
+                  'LE': sum(LE),
+                  'H': sum(H),
+                  'Trfall': P, # kgm-2
+                  'Interc': sum(interc * dt * WATER_DENSITY * self.dz) # kgm-2
+                 }
+        state['H2Os'] = H2Os
+        
         return source, fluxes, state
+    
 
-        
 #%% water and heat flow in moss tissues
 
 def water_flow(t_final, z, initial_state, parameters, source, lbc, steps=10):
@@ -533,7 +558,7 @@ def water_flow(t_final, z, initial_state, parameters, source, lbc, steps=10):
             'water_potential' [m]
             'volumetric_water_content' [m3 m-3]
             'volumetric_ice_content' [m3m-3] NOT CHANGED DURING COMPUTATIONS
-
+            'temperature' [degC] NOT CHANGED DURING COMPUTATIONS
     References:
         vanDam & Feddes (2000): Numerical simulation of infiltration, evaporation and shallow
         groundwater levels with the Richards equation, J.Hydrol 233, 72-85.
@@ -558,18 +583,18 @@ def water_flow(t_final, z, initial_state, parameters, source, lbc, steps=10):
     T_ini = T_ini[::-1]
     W_tot = W_tot[::-1]
 
-    N = len(z) # zero at moss canopy top, z<= 0, constant steps
+    N = len(z)
     dz = np.abs(z[0] - z[1])
     dz2 = dz**2
     
     # initial and computational time step [s]
     dto = t_final / steps
     dt = dto # adjusted during solution
-    dt_min = 0.1 # minimum timestep
+    dt_min = 1.0 # minimum timestep
     
     # convergence criteria
     crit_W = 1.0e-4  # moisture [m3 m-3] 
-    crit_h = 1.0e-5  # head [m]
+    crit_h = 1.0e-4  # head [m]
            
     # cumulative fluxes for 0...t_final
     Evap = 0.0
@@ -621,9 +646,9 @@ def water_flow(t_final, z, initial_state, parameters, source, lbc, steps=10):
             #E = np.zeros(N)
             
             # add here constraint that Ew <= (theta - theta_r) / dt
-            f = np.where((W_iter - pF['theta_r'] - 10*EPS)/dt - S <= 0)[0]
-            if len(f) >0:
-                print(f)
+            f = np.where((W_iter - pF['theta_r'] - 1e3*EPS) / dt - S <= 0)[0]
+            if len(f) > 0:
+                print('toohighE', f)
             S[f] = 0.0
             del f
             
@@ -689,7 +714,7 @@ def water_flow(t_final, z, initial_state, parameters, source, lbc, steps=10):
             if any(abs(h_iter - h_iter0) > 1.0) or any(np.isnan(h_iter)):
                 if dt > dt_min:
                     dt = max(dt / 3.0, dt_min)
-                    print('(iteration %s) Solution blowing up, retry with dt = %.1f s' %(iterNo, dt))
+                    print('water (iteration %s) Solution blowing up, retry with dt = %.1f s' %(iterNo, dt))
                     #print('err_h: %.5f, errW: %.5f, errT: %.5f,, errWice: %.5f' %(err_h, err_W, err_T, err_Wice))
                     iterNo = 0
                     h_iter = h_old.copy()
@@ -697,10 +722,14 @@ def water_flow(t_final, z, initial_state, parameters, source, lbc, steps=10):
                     #Wice_iter = Wice_old.copy()
                     continue
                 else:  # convergence not reached with dt=30s, break
-                    print('(iteration %s)  No solution found (blow up), h and Wtot set to old values' %(iterNo))
-                    h_iter = h_old.copy()
-                    W_iter = W_old.copy()
-                    time.sleep(5)
+                    #print('(iteration %s)  No solution found (blow up), h and Wtot set to old values' %(iterNo))
+                    #h_iter = h_old.copy()
+                    #W_iter = W_old.copy()
+                    print('water (iteration %s)  No solution found (blow up), only sink/source extracted' %(iterNo))
+                    W_iter = W_old - S * dt
+                    h_iter = water_retention(pF, theta=W_iter)
+
+                    #time.sleep(5)
                     #Wice_iter = Wice_old.copy()
                     break
 
@@ -708,12 +737,12 @@ def water_flow(t_final, z, initial_state, parameters, source, lbc, steps=10):
             if iterNo == 20:
                 if dt > dt_min:
                     dt = max(dt / 3.0, dt_min)
-                    print('iteration %s) More than 20 iterations, retry with dt = %.1f s' %(iterNo, dt))
+                    print('water: iteration %s) More than 20 iterations, retry with dt = %.1f s' %(iterNo, dt))
                     print('err_h: %.5f, errW: %.5f' %(err_h, err_W))
                     iterNo = 0
                     continue
                 else:  # convergence not reached with dt=dt_min, break
-                    print('(iteration %s) Solution not converging, err_h: %.5f, errW: %.5f:' 
+                    print('water: (iteration %s) Solution not converging, err_h: %.5f, errW: %.5f:' 
                           %(iterNo, err_h, err_W))
                     break
 
@@ -800,11 +829,20 @@ def heat_flow(t_final, z, initial_state, parameters, source, lbc, ubc, steps=10)
         source (array): heat sink/source [Wm-3]
         lbc (dict): {'flux': float} or {'temperature': float}. Note: flux TO layer positive
         ubc (dict): {'flux': float} or {'temperature': float}. Note: flux TO layer positive
+    Returns:
+        fluxes(dict): 
+            Fheat (Wm-2)
+            ebe (Wm-2)
+        state (dict):
+            temperature
+            volumetric_water_content
+            volumetric_ice_content
+    NOTE: check ebe calculation; boundary fluxes taken wrongly!
     """
     
     #ubc = {'type': 'flux', 'value': 0.0}
  
-    #note: assumes constant properties across layers. if these are arrays, remember to flip all
+    #note: assumes constant properties across layers. if these are arrays, remember to flip all!
     
     fp = parameters['freezing_curve']
     poros = parameters['porosity']
@@ -838,7 +876,7 @@ def heat_flow(t_final, z, initial_state, parameters, source, lbc, ubc, steps=10)
     # Liquid and ice content, and dWliq/dTs
     Wliq, Wice, gamma = frozen_water(T_ini, Wtot, fp=fp, To=FREEZING_POINT_H2O)
 
-    # specifications for iterative solution
+    # criteria for iterative solution
     Conv_crit1 = 1.0e-3  # degC
     Conv_crit2 = 1.0e-5  # ice content m3/m3
 
@@ -849,6 +887,7 @@ def heat_flow(t_final, z, initial_state, parameters, source, lbc, ubc, steps=10)
     dt = dto  # adjusted during solution
 
     T = T_ini.copy()
+
     """ solve water flow for 0...t_final """
     while t < t_final:
         # these will stay during iteration over time step "dt"
@@ -947,7 +986,7 @@ def heat_flow(t_final, z, initial_state, parameters, source, lbc, ubc, steps=10)
                     dt = max(dt / 3.0, dt_min)
 #                    logger.debug('%s (iteration %s) More than 20 iterations, retry with dt = %.1f s',
 #                                 date, iterNo, dt)
-                    print('iterno == 20')
+                    print('heat: iterno == 20')
                     iterNo = 0
                     T_iter = T_old.copy()
                     Wice_iter = Wice_old.copy()
@@ -962,7 +1001,7 @@ def heat_flow(t_final, z, initial_state, parameters, source, lbc, ubc, steps=10)
                     dt = max(dt / 3.0, dt_min)
 #                    logger.debug('%s (iteration %s) Solution blowing up, retry with dt = %.1f s',
 #                                 date, iterNo, dt)
-                    print('(iteration %s) Solution blowing up, retry with dt = %.1f s', iterNo, dt)
+                    print('heat: (iteration %s) Solution blowing up, retry with dt = %.1f s', iterNo, dt)
                     iterNo = 0
                     T_iter = T_old.copy()
                     Wice_iter = Wice_old.copy()
@@ -1105,7 +1144,8 @@ def hydraulic_conductivity(pF, wliq, Ksat=1.0):
     S = np.minimum(1.0, (w - pF['theta_r']) / (pF['theta_s'] - pF['theta_r']) + EPS)
 
     Kh = Ksat * S**l * (1 - (1 - S**(1/m))**m)**2
-
+    Kh = np.maximum(10*EPS, Kh)
+    
     return Kh
 
 def diff_wcapa(pF, h):
@@ -1275,6 +1315,7 @@ def molecular_diffusivity_porous_media(T, wtot, porosity, scalar, P=101300.0):
     return f * Do
 
 def surface_energy_balance(forcing, params, Ts, gsoil):
+    """ surface temperature from surface energy balance with fsolve """
     
     alb = params['albedo']
     emi = params['emissivity']
@@ -1402,6 +1443,9 @@ def central_diff(y, dx):
 
     return dydx
 
+
+""" radiation regime in multi-layer moss canopy """
+
 class MossRadiation(object):
     """ handles SW-radiation in multi-layer moss canopy"""
         
@@ -1437,6 +1481,7 @@ class MossRadiation(object):
         # here adjust albedo for water content; this is from Antti's code and represents bulk moss
         #f = 1.0 + 3.5 / (1.0 + np.power(10.0, 4.53 * forcing['water_content'] / self.max_water_content))
         f = 1.0
+        
         PARb, PARd, PARu, _, _, q_sl, q_sh, q_soil, f_sl, PAR_alb = sw_model(self.Lz,
             self.Clump, self.leaf_angle, forcing['zenith_angle'], forcing['dir_par'], forcing['dif_par'],
             self.PAR_albedo * f, SoilAlbedo=self.soil_albedo, PlotFigs=False)
@@ -1483,3 +1528,392 @@ class MossRadiation(object):
         LWlayer *= self.Lz # Wm-2 ground per layer
         
         return LWlayer[0:-1], LWdn[1:], LWup[0:-1], gr[0:-1]
+    
+#%% OLD STUFF
+#        
+#    def run_timestep2(self, dt, forcing, boundary, sub_dt=60.0):
+#        """ solves moss canopy model for one timestep 
+#            dt: timestep [s]
+#            forcing (dataframe): meteorological and soil forcing data
+#                'precipitation': precipitation rate [m s-1]
+#                'air_temperature': air temperature [\ :math:`^{\circ}`\ C]
+#                'dir_par': direct phototosynthetically active radiation [W m-2]
+#                'dif_par': diffuse phototosynthetically active radiation [W m-2]
+#                'dir_nir': direct near infrared radiation [W m-2]
+#                'dif_nir': diffuse near infrare active radiation [W m-2]
+#                'lw_in': Downwelling long wave radiation [W m-2]
+#                'wind_speed': wind speed [m s-1]
+#                'friction_velocity': friction velocity [m s-1]
+#                'co2': ambient CO2 mixing ratio [ppm]
+#                'h2o': ambient H2O mixing ratio [mol mol-1]
+#                'air_pressure': pressure [Pa]
+#                'zenith_angle': solar zenith angle [rad]
+#                'soil_temperature': [\ :math:`^{\circ}`\ C] properties of first soil node
+#                'soil_water_potential': [m] properties of first soil node
+#                'soil_evaporation': [molm-2s-1] from the first soil node
+#                'soil_respiration': [umolm-2s-1] from the first soil node 
+#            'parameters':
+#                'date'
+#                'thermal_conductivity': [W m\ :sup:`-1`\  K\ :sup:`-1`\ ] properties of first soil node
+#                'hydraulic_conductivity': [m s\ :sup:`-1`\ ] properties of first soil node
+#                'depth': [m] properties of first soil node
+#        """
+#        gam = 0.5
+#        
+#        # moss layer initial state
+#        initial_state = {'Ts': self.T.copy(), 'Wliq': self.Wliq.copy(), 'Wice': self.Wice.copy()}
+#        
+#        heat_lbc = boundary['heat']
+#        water_lbc = boundary['water']     
+#        
+#        # --- current flow statistics
+#        self.Flow.compute_flow(Utop=forcing['wind_speed'], Ubot=0.0)
+#
+#        # --- compute SW radiation within canopy ---
+#        sw_forcing = {'zenith_angle': forcing['zenith_angle'],
+#                      'dir_par': forcing['dir_par'],
+#                      'dif_par': forcing['dif_par'],
+#                      'dir_nir': forcing['dir_nir'],
+#                      'dif_nir': forcing['dif_nir'],
+#                      'water_content': np.mean(self.water_content)
+#                      }
+#        SWabs, PARabs, PARz, PAR_alb, NIR_alb, f_sl = self.Radiation.sw_profiles(sw_forcing)
+#        del sw_forcing
+#        
+#        # --- iterative solution of H2O, T, and Ts within canopy air space ---
+#
+#        max_errT = 0.0001  # relativeerror
+#        max_errh2o = 0.0001 # relative error
+#        max_errTs = 0.001 # degC
+#        
+#        max_iter = 500 #50  # maximum iterations
+#        err_T, err_h2o, err_Ts = 999., 999., 999.
+#
+#        # initialize air-space state variables
+#        T, H2O, CO2 = self._restore_scalar_profiles(forcing)
+#        
+#        # initial profile shape taken from last timestep
+#        #if self.Flow.profiles is None:
+#        #    T, H2O, CO2 = self._restore_scalar_profiles(forcing)
+#        #    self.Flow.profiles = {'T': T, 'H2O': H2O}
+#
+#        #T = self.Flow.profiles['T'] / self.Flow.profiles['T'][-1] * forcing['air_temperature']
+#        #H2O = self.Flow.profiles['H2O'] / self.Flow.profiles['H2O'][-1] * forcing['h2o']
+#        
+#        Ts0 = self.T.copy()   
+#        Ts = Ts0.copy()
+#        S0 = {'heat': np.zeros(self.Nlayers), 'H2O': np.zeros(self.Nlayers)}
+#        
+#        # for analyzing behavior
+#        Tres = []
+#        qres = []
+#        Hres = []
+#        LEres = []
+#        Tsres = []
+#        
+#        iter_no = 0
+#        while (err_T > max_errT or err_h2o > max_errh2o or err_Ts > max_errTs) and iter_no <= max_iter:
+#
+#            iter_no += 1
+#            
+#            Told = T.copy()
+#            H2Oold = H2O.copy()
+#            Tsold = Ts.copy()
+# 
+#            # solve long-wave
+#            lw_forcing = {'lw_in': forcing['lw_in'],
+#                          'soil_temperature': Ts[0], #forcing['soil_temperature'],
+#                          'T': Ts
+#                          }
+#
+#            LWabs, LWdn, LWup, gr = self.Radiation.lw_profiles(lw_forcing)
+#            del lw_forcing
+#            
+#            # solve moss energy balance      
+#            ebal_forcing = {'SWabs': SWabs, 
+#                            'LWabs': LWabs,
+#                            'T': T[0:self.Nlayers].copy(),
+#                            'H2O': H2O[0:self.Nlayers].copy(),
+#                            'U': self.Flow.U[0:self.Nlayers].copy(),
+#                            'Pamb': forcing['air_pressure'],
+#                            'Precip': forcing['precipitation'],
+#                            #'soil_temperature': forcing['soil_temperature'],
+#                            #'lw_in': forcing['lw_in']
+#                            }
+#
+#            #heat_lbc = boundary['heat']
+#            #water_lbc = boundary['water']
+#            
+#            
+#            #initial_state = {'Ts': self.T.copy(), 'Wliq': self.Wliq.copy(), 'Wice': self.Wice.copy()}
+#            
+#            source, fluxes, state = self.solve_energybalance_old(dt,
+#                                                              ebal_forcing, 
+#                                                              initial_state,
+#                                                              heat_lbc, water_lbc
+#                                                              )
+#            Ts = state['temperature'].copy()
+#            err_Ts = np.max(abs(Ts - Tsold))
+#            
+#            # solve air-space profiles
+#            initial_profile = {'T': Told, 'H2O': H2Oold}
+#            
+#            lbc = {'heat': 0.0, # heat flux from ground
+#                   'H2O': 0.0 # water flux from ground
+#                  }
+#            #sink-source profiles average from last 2 iterations to reduce oscillation
+#            source['H2O'] = source['latent_heat'] / LATENT_HEAT
+#            
+#            S = {'heat': S0['heat'] * (1.0 - gam) + source['heat'] * gam,
+#                 'H2O': S0['H2O'] * (1.0 - gam) + source['H2O'] *  gam}
+#            
+#            S0 = S.copy()
+#            
+#            H2O, T, err_h2o, err_T = self.Flow.scalar_profiles(initial_profile,
+#                                                               S.copy(),
+#                                                               forcing['air_pressure'],
+#                                                               lbc)
+#            
+#            del S
+#            Tres.append(T)
+#            qres.append(H2O)
+#            Hres.append(fluxes['H'])
+#            LEres.append(fluxes['LE'])
+#            Tsres.append(Ts)
+#
+#        print('iterNo=', iter_no)
+#        
+#        # solve moss water flow
+#        parameters = {'pF': self.pF,
+#                      'Ksat': self.Ksat,
+#                      'freezing_curve': self.freezing_curve,
+#                      #'porosity': self.porosity
+#                      }
+#                
+#        water_fluxes, state, dto = water_flow(dt, self.z, state, parameters, source['water'], water_lbc, steps=1)
+#        
+#
+##        # plot statistics
+##        if iter_no == 51:
+##            print(err_T, err_h2o, err_Ts)
+##            #H2Omoss = state['H2Os']
+##            es = 611.0 * np.exp((17.502 * T) / (T + 240.97))  # Pa
+##            es = es / forcing['air_pressure'] 
+##            
+##            plt.figure()
+##            
+##            for k in np.arange(0, 50):
+###            plt.subplot(321); plt.plot(Ts, self.z, '-', T, self.Flow.z, 'r--'); plt.title('Tmoss and T')
+###            plt.subplot(322); plt.plot(state['volumetric_water_content'], self.z, '-'); plt.title('Wliq')
+###            plt.subplot(323); plt.plot(source['heat']*self.dz, self.z); plt.title('H')
+###            plt.subplot(324); plt.plot(source['latent_heat']*self.dz, self.z); plt.title('LE')
+###            plt.subplot(325); plt.plot(H2O, self.Flow.z, 'r-', H2Omoss, self.z, '--',  es, self.Flow.z, ':'); plt.title('H2O')
+###            plt.subplot(326); plt.plot(state['volumetric_ice_content'], self.z, '-'); plt.title('Wice')
+##                plt.subplot(321); plt.plot(Tsres[k], self.z, '-'); plt.title('Tmoss')
+##                plt.subplot(322); plt.plot(Tres[k], self.Flow.z, '-'); plt.title('Ta')
+##                plt.subplot(323); plt.plot(qres[k], self.Flow.z, '-'); plt.title('qa')
+##                plt.subplot(324); plt.plot(Hres[k], self.z, '-'); plt.title('H')
+##                plt.subplot(325); plt.plot(LEres[k], self.z, '-'); plt.title('LE')
+##            #plt.subplot(326); plt.plot(self.Flow.U, self.Flow.z); plt.title('U')
+#       
+#        # update profiles; initial guess for next dt
+#        canopyflx = {'Rnet': np.sum(SWabs + LWabs),
+#                     'H': np.sum(source['heat']*self.dz),
+#                     'LE': np.sum(source['latent_heat']*self.dz),
+#                     'LWabs': LWabs, # Wm-2 per layer
+#                     'SWabs': SWabs, # Wm-2 per layer
+#                     'LEz': source['latent_heat']*self.dz, # Wm-2 per layer
+#                     'Hz': source['heat']*self.dz, # Wm-2 per layer
+#                     'S': source['S'], #Wm-3
+#                     'Sadv': source['adv'], #Wm-3 advective energy 
+#                     'Trfall': fluxes['Trfall'], #troughfall [kgm-2 ground]
+#                     'Interc': fluxes['Interc'] #interception [kgm-2 ground]
+#                     }
+#        self.Flow.profiles = {'H2O': H2O, 'T': T}
+#        
+#        return state, canopyflx, T, H2O
+    
+#        
+#    def solve_energybalance_old(self, dt, forcing, initial_state, heat_lbc, water_lbc):
+#        """
+#        solution of surface energy balance and heat flow in moss
+#        NOTE: uses object properties and state variables of water-balance
+#        
+#        Args:
+#            self - object
+#            dt - timestep [s]
+#            forcing (dict):
+#                SWabs - layer absorbed SW radiation [Wm-2 (ground)]
+#                LWabs - layer absorbed LW radiation [Wm-2 (ground)]    
+#                U - flow velocity [ms-1]
+#                T - air-space temperature [degC]
+#                H2O - air-space humidity [mol mol-1]
+#            initial_state (dict)
+#                Ts - moss temperature profile [degC]
+#                Wliq - moss liquid water content [m3m-3]
+#                Wice - moss ice content [m3m-3]
+#            heat_lbc (dict): lower boundary condition
+#        Returns:
+#            S - heat sink/source term [Wm-3]
+#            E - evaporation / condensation rate [s-1]
+#            H - sensible heat flux [Wm-2 (ground)]
+#            LE - latent heat flux [Wm-2 (ground)]
+#
+#        """
+#        SWabs = forcing['SWabs']
+#        LWabs = forcing['LWabs']
+#        U = forcing['U']
+#        Ta = forcing['T']
+#        H2Oa = forcing['H2O']
+#        Pamb = forcing['Pamb']
+#        Prec = forcing['Precip']
+#        
+#        Ts0 = initial_state['Ts'].copy()
+#        Wliq0 = initial_state['Wliq'].copy()
+#        Wice0 = initial_state['Wice'].copy()        
+#
+#        del initial_state
+#        
+#        # maximum storage capacity kg m-2 per layer
+#        Smax = np.ones(self.Nlayers) * self.pF['theta_s'] * self.dz * WATER_DENSITY
+#
+#        
+#        # heat and water flow parameters & bc's
+#        parameters = {'pF': self.pF,
+#                      'Ksat': self.Ksat,
+#                      'freezing_curve': self.freezing_curve,
+#                      'porosity': self.porosity}
+#            
+#        heat_ubc = {'type': 'flux', 'value': 0.0}
+#        
+#        # boundary-layer conductance [molm-2s-1]
+#        gh = 0.135 * np.sqrt(U / self.length_scale) * self.Lz
+#        gv = 0.147 * np.sqrt(U / self.length_scale) * self.Lz
+#        #gr = gr * self.Lz
+#
+#        dt0 = dt
+#        #dt = dt0 / 10
+#        Ts = Ts0.copy()
+#        Wliq = Wliq0.copy()
+#        Wice = Wice0.copy()
+#        
+#        # mean fluxes over t
+#        LEcum = 0.0
+#        Hcum = 0.0
+#        Ecum = 0.0
+#        Trfall = 0.0
+#        Interc = 0.0
+#        
+#        t = 0.0
+#        
+#        while t < dt0:
+#            
+#            """ intercept rainfall and compute respective heat and water sources """
+#            available_water, available_space = self._water_flux_constraints(Wliq) # kgm-2 in layer
+#            
+#            interc = np.zeros(self.Nlayers)
+#            adv_heat = np.zeros(self.Nlayers)
+#            
+#            P = Prec * dt  # kg m-2
+#            
+#            if P > 0:
+#                #P = Prec * dt
+#                S0 = Wliq * self.dz * WATER_DENSITY
+#                
+#                for n in reversed(range(self.Nlayers)): # start from top
+#                    interc[n] = (Smax[n] - S0[n]) * (1.0 - np.exp(-P / Smax[n]))
+#                    P -= interc[n] # kgm-2
+#
+#            # update available water & space
+#            available_water += interc
+#            available_space -= interc
+#            
+#
+#            # convert units
+#            interc = interc / dt / WATER_DENSITY / self.dz # s-1
+#            adv_heat = interc / WATER_DENSITY * CV_WATER * Ta # W m-3
+#            
+#            """ ------- """
+#            
+#            # surface humidity
+#            h = water_retention(self.pF, theta=Wliq) # m
+#            rh = relative_humidity(h, Ts) #[-]
+#
+#            es = 611.0 * np.exp((17.502 * Ts) / (Ts + 240.97))  # Pa
+#            es = es / Pamb    
+#            H2Os = rh * es # mol/mol
+#            
+#            # evaporation / condensation rate
+#            E_demand = gv * (H2Os - H2Oa) * MOLAR_MASS_H2O # kgm-2s-1
+#
+#            #available_water, available_space = self._water_flux_constraints(Wliq) # kgm-2 in layer
+#            
+#            E = np.maximum(np.minimum(E_demand, 0.5*available_water / dt),
+#                           -0.8*available_space / dt) #kgm-2s-1
+#
+#            # latent heat of vaporization
+#            L = 1e3 * (3147.5 - 2.37 * (Ts + DEG_TO_KELVIN)) # J kg-1
+#    
+#            # fluxes [Wm-2 (ground) per layer]
+#            H = SPECIFIC_HEAT_AIR * gh * (Ts - Ta)
+#            # F = SPECIFIC_HEAT_AIR * gr * (Ts - Ta)
+#            LE = L * E
+#            
+#            # heat sink / source term [Wm-2 (ground)]   
+#            S = (SWabs + LWabs) - H - LE #- F
+#            S = S / self.dz #Wm-3
+#            E = E / WATER_DENSITY / self.dz # s-1
+#
+#            # solve water and heat flow
+#            initial_state = {'volumetric_water_content': Wliq,
+#                             'volumetric_ice_content': Wice,
+#                             'temperature': Ts}
+#            
+#            heat_fluxes, state, _ = heat_flow(dt, self.z, initial_state, parameters, S + adv_heat, heat_lbc, heat_ubc, steps=1)
+#            
+#            t += dt
+#            #print('t', t)
+#
+#            Ts = state['temperature']
+#            Wliq = state['volumetric_water_content']
+#            Wice = state['volumetric_ice_content']
+#            #initial_state = states.copy()
+#            
+##            plt.figure(1)
+##            plt.subplot(321); plt.plot(Ts, self.z); plt.title('Ts')
+##            plt.subplot(322); plt.plot(Wliq, self.z); plt.title('Wliq')
+##            plt.subplot(323); plt.plot(H, self.z); plt.title('H')
+##            plt.subplot(324); plt.plot(LE, self.z); plt.title('LE')
+##            plt.subplot(325); plt.plot(S*self.dz, self.z); plt.title('Sheat')
+##            plt.subplot(326); plt.plot(SWabs + LWabs, self.z); plt.title('Rnet')
+#
+#            # cumulate fluxes
+#            LEcum += LE * dt
+#            Ecum += E * WATER_DENSITY * self.dz * dt
+#            Hcum += H * dt
+#            Trfall += P
+#            Interc += sum(interc * dt * WATER_DENSITY * self.dz)
+#            
+#            # return dicts
+#            source = {'H2O': Ecum / self.dz / dt * MOLAR_MASS_H2O, #E * WATER_DENSITY * MOLAR_MASS_H2O,
+#                      'heat': Hcum / dt / self.dz, #H / self.dz,
+#                      'latent_heat': LE / self.dz,
+#                      'S': S,
+#                      'adv': adv_heat,
+#                      'water': -E + interc
+#                      }
+#
+#            fluxes = {'heat conduction': heat_fluxes['Fheat'],
+#                      'ebe': heat_fluxes['ebe'],
+#                      #'water_conduction': water_fluxes['Fwater'],
+#                      #'Qbot': water_fluxes['Qbot'],
+#                      #'mbe': water_fluxes['mbe'],
+#                      'LE': LEcum / dt0,
+#                      'H': Hcum / dt0,
+#                      'Trfall': Trfall,
+#                      'Interc': Interc
+#                     }
+#            state['H2Os'] = H2Os
+#            
+#        return source, fluxes, state
+        

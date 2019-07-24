@@ -56,38 +56,52 @@ class MossFlow(object):
         self.gam = para['gam']
              
         # initialize state variables
-        self.taun, self.Un, self.Kmn, self.l_mix = closure_model_U_moss(
-                self.z, self.lad, self.hc, utop + EPS, ubot + EPS)
+        #self.taun, self.Un, self.Kmn, self.l_mix = closure_model_U_moss(
+        #        self.z, self.lad, self.hc, utop + EPS, ubot + EPS)
         
-        self.U = None
-        self.Km = None
-        self.Ks = None
-        self.ust = None
+        self.U = None # ms-1
+        self.Km = None # m2s-1
+        self.Ks = None # ms-1
+        self.ust = None # ms-1
+        self.l_mix = None # m
         
         self.profiles = None
-        
-    def update_state(self, ustaro):
-        r""" Updates wind speed and eddy diffusivity profile.
-        Args:
-            ustaro (float): friction velocity at highest grid point [m s-1]
-        Updates un-normalized state variables (self.U, self.Km)
-        Returns:
-            U [ms-1]
-            ustar [ms-1]
+    
+    def compute_flow(self, Utop, Ubot=0.0):
         """
-
-        U = self.Un * ustaro + EPS
-        U[0] = U[1]
-        self.U = U
+        computes flow profile and updates object state. Note: Utop in [m/s]
+        """
+        Dm = 20e-6 # molecular diffusivity ms-1
         
-        Km = self.Kmn * ustaro + EPS
-        Km[0] = Km[1]
-        self.Km = Km
-        self.Ks = self.Km * self.Sc
+        tau, self.U, self.Km, self.l_mix = closure_model_U_moss(
+                self.z, self.lad, self.hc, Utop + EPS, Ubot + EPS)
         
-        ustar = np.sqrt(abs(self.taun)*ustaro**2)
-
-        return U, ustar
+        self.Ks = self.Sc * self.Km + Dm
+        self.ust = np.sqrt(abs(tau))
+        
+#    def update_state(self, ustaro):
+#        r""" Updates wind speed and eddy diffusivity profile.
+#        Args:
+#            ustaro (float): friction velocity at highest grid point [m s-1]
+#        Updates un-normalized state variables (self.U, self.Km)
+#        Returns:
+#            U [ms-1]
+#            ustar [ms-1]
+#        
+#        """
+#
+#        U = self.Un * ustaro + EPS
+#        U[0] = U[1]
+#        self.U = U
+#        
+#        Km = self.Kmn * ustaro + EPS
+#        Km[0] = Km[1]
+#        self.Km = Km
+#        self.Ks = self.Km * self.Sc
+#        
+#        ustar = np.sqrt(abs(self.taun)*ustaro**2)
+#
+#        return U, ustar
 
     def scalar_profiles(self, initial_profile, source, P, lbc):
         r""" Solves scalar profiles (H2O, CO2 and T) within canopy.
@@ -126,6 +140,7 @@ class MossFlow(object):
             if m < self.Nlayers:
                 source[key] = np.pad(source[key], (0, self.Nlayers - m), mode='constant', constant_values=[0])
                
+                
         # --- H2O ---
         H2O = closure_1_model_scalar(dz=self.dz,
                                      Ks=self.Ks,
@@ -136,6 +151,7 @@ class MossFlow(object):
                                      T=Tprev[-1], P=P)
         # new H2O
         H2O = (1 - self.gam) * H2Oprev + self.gam * H2O
+        
         # limit change to +/- 10%
         if all(~np.isnan(H2O)):
             H2O[H2O > H2Oprev] = np.minimum(H2Oprev[H2O > H2Oprev] * 1.1, H2O[H2O > H2Oprev])
@@ -143,7 +159,10 @@ class MossFlow(object):
 
         # relative error
         err_h2o = max(abs((H2O - H2Oprev) / H2Oprev))
-    
+        H2Oprev = H2O.copy()
+        
+        #err_h2o = max(abs(H2O - H2Oprev))
+
         # --- T ---
         T = closure_1_model_scalar(dz=self.dz,
                                    Ks=self.Ks,
@@ -154,14 +173,17 @@ class MossFlow(object):
                                    T=Tprev[-1], P=P)
         # new T
         T = (1 - self.gam) * Tprev + self.gam * T
+        
         # limit change to T_prev +/- 2degC
         if all(~np.isnan(T)):
             T[T > Tprev] = np.minimum(Tprev[T > Tprev] + 2.0, T[T > Tprev])
             T[T < Tprev] = np.maximum(Tprev[T < Tprev] - 2.0, T[T < Tprev])
     
-        # absolut error
         err_t = max(abs((T - Tprev) / Tprev))
         
+        Tprev = T.copy()
+            
+        #err_t = max(abs(T - Tprev))
     #    if 'CO2' in source:
     #        CO2prev = initial_profile['CO2'].copy()        
     #        CO2 = closure_1_model_scalar(dz=self.dz,
@@ -216,7 +238,7 @@ def closure_model_U_moss(z, lad, hc, Utop, Ubot, lbc_flux=None, U_ini=None):
             l - length scale (m)
             p - parameter dict
         """
-        #here add Cd as a function or Re from Gaby!
+        #here add Cd as a function of Re from Gaby!
         #Re = U*l / AIR_VISCOSITY
         #Cd = p[0] / Re * (1 + p[1]*Re)
         Cd = 0.2
@@ -377,10 +399,6 @@ def closure_1_model_scalar(dz, Ks, source, ubc, lbc, scalar, T=20.0, P=101300.0,
 
     Ks = spatial_average(Ks, method='arithmetic')  # length N+1
 
-#    if scalar.upper() == 'CO2':  # [umol] -> [mol]
-#        ubc = 1e-6 * ubc
-#        source = 1e-6 * source
-#        lbc = 1e-6 * lbc
 
     if scalar.upper() == 'T':
         CF = CF * SPECIFIC_HEAT_AIR  # [J m-3 K-1], volumetric heat capacity of air
@@ -417,9 +435,6 @@ def closure_1_model_scalar(dz, Ks, source, ubc, lbc, scalar, T=20.0, P=101300.0,
         f[0] = lbc
 
     x = tridiag(a, b, g, f)
-
-#    if scalar.upper() == 'CO2':  # [mol] -> [umol]
-#        x = 1e6*x
 
     return x
 
