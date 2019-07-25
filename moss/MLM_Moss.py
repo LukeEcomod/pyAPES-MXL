@@ -96,7 +96,8 @@ CV_ORGANIC = 2.50e6  # dry organic matter
 
 class MLM_Moss(object):
     """
-    Describes heat and water conduction in moss tissues and exchange with canopy air
+    Describes heat and water conduction in moss tissues and exchange with the
+    canopy air and soil
     """
     def __init__(self, z, para, initial_state):
         """
@@ -294,12 +295,7 @@ class MLM_Moss(object):
                             #'lw_in': forcing['lw_in']
                             }
 
-            #heat_lbc = boundary['heat']
-            #water_lbc = boundary['water']
-            
-            
-            #initial_state = {'Ts': self.T.copy(), 'Wliq': self.Wliq.copy(), 'Wice': self.Wice.copy()}
-            
+            # note: uses Moss state from previous timestep as initial value            
             source, fluxes, state = self.solve_energybalance(dt,
                                                               ebal_forcing, 
                                                               heat_lbc, water_lbc
@@ -333,7 +329,7 @@ class MLM_Moss(object):
             LEres.append(fluxes['LE'])
             Tsres.append(Ts)
 
-        print('iterNo=', iter_no)
+        #print('iterNo=', iter_no)
         
         # solve moss water flow
         parameters = {'pF': self.pF,
@@ -345,29 +341,6 @@ class MLM_Moss(object):
         water_fluxes, state, dto = water_flow(dt, self.z, state, parameters, source['water'], water_lbc, steps=1)
         
 
-#        # plot statistics
-#        if iter_no == 51:
-#            print(err_T, err_h2o, err_Ts)
-#            #H2Omoss = state['H2Os']
-#            es = 611.0 * np.exp((17.502 * T) / (T + 240.97))  # Pa
-#            es = es / forcing['air_pressure'] 
-#            
-#            plt.figure()
-#            
-#            for k in np.arange(0, 50):
-##            plt.subplot(321); plt.plot(Ts, self.z, '-', T, self.Flow.z, 'r--'); plt.title('Tmoss and T')
-##            plt.subplot(322); plt.plot(state['volumetric_water_content'], self.z, '-'); plt.title('Wliq')
-##            plt.subplot(323); plt.plot(source['heat']*self.dz, self.z); plt.title('H')
-##            plt.subplot(324); plt.plot(source['latent_heat']*self.dz, self.z); plt.title('LE')
-##            plt.subplot(325); plt.plot(H2O, self.Flow.z, 'r-', H2Omoss, self.z, '--',  es, self.Flow.z, ':'); plt.title('H2O')
-##            plt.subplot(326); plt.plot(state['volumetric_ice_content'], self.z, '-'); plt.title('Wice')
-#                plt.subplot(321); plt.plot(Tsres[k], self.z, '-'); plt.title('Tmoss')
-#                plt.subplot(322); plt.plot(Tres[k], self.Flow.z, '-'); plt.title('Ta')
-#                plt.subplot(323); plt.plot(qres[k], self.Flow.z, '-'); plt.title('qa')
-#                plt.subplot(324); plt.plot(Hres[k], self.z, '-'); plt.title('H')
-#                plt.subplot(325); plt.plot(LEres[k], self.z, '-'); plt.title('LE')
-#            #plt.subplot(326); plt.plot(self.Flow.U, self.Flow.z); plt.title('U')
-       
         # update profiles; initial guess for next dt
         canopyflx = {'Rnet': np.sum(SWabs + LWabs),
                      'H': fluxes['H'],
@@ -499,7 +472,6 @@ class MLM_Moss(object):
         
         heat_fluxes, state, _ = heat_flow(dt, self.z, initial_state, parameters, S + adv_heat, heat_lbc, heat_ubc, steps=1)
         
-            
         # return dicts
         source = {'S': S, #Wm-3
                   'Sadv': adv_heat, #Wm-3

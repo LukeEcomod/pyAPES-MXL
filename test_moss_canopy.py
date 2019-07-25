@@ -10,11 +10,11 @@ import matplotlib as mpl
 mpl.rc('image', cmap='coolwarm')
 import matplotlib.pyplot as plt
 
-from moss.MLM_Moss import MLM_Moss, water_flow, heat_flow
+from moss.MLM_Moss import MLM_Moss #, water_flow, heat_flow
 
 # make grid and lad
 dz = 0.005 # grid size
-height = 0.10
+height = 0.05
 z = np.arange(0, (height + dz), dz)
 LAI = 10.0
 
@@ -27,7 +27,7 @@ para = {'height': height,
         'bulk_density': 20.0,
         'max_water_content': 10.0,
         'min_water_content': 1.5,
-        'pF':{'alpha': 0.13, 'n': 2.17, 'l': -2.37, 'Ksat': 1.2e-5},
+        'pF':{'alpha': 0.13, 'n': 2.17, 'l': -2.37, 'Ksat': 1.2e-8},
         'porosity': 0.98,
         'length_scale': 0.005,
         'freezing_curve': 0.25,
@@ -85,29 +85,6 @@ initial_state = {'temperature': a * 15.0,
 # create MLM_Moss instance
 Moss = MLM_Moss(z, para, initial_state)
 
-### test water flow routine
-#dt = 24.0 * 3600.0 # s
-##lbc = {'type': 'head', 'value': 0.0}
-#lbc = {'type': 'flux', 'value': 0.0}
-#ubc = {'type': 'flux', 'value':0.0}
-#g = np.shape(a)
-#source = np.ones(g)*-1e-5
-##source = np.zeros(g)
-##fluxes, states, dto = Moss.water_flow(dt, {'Wtot': Moss.Wtot}, source, lbc, ubc, steps=10)
-#
-#pF= Moss.pF
-#initial_state['volumetric_water_content'] = a*pF['theta_s']*0.6
-#initial_state['volumetric_ice_content'] = a * 0.0
-#parameters = {'pF': pF, 'Ksat': 1.2e-5, 'freezing_curve': 0.25, 'porosity': 0.98}
-##lbc  =  {'type': 'head', 'value': -0.1}
-#lbc  =  {'type': 'flux', 'value': 0.0}
-#
-##fluxes, states, dto = water_flow(dt, z, initial_state, parameters, source, lbc)
-#
-#lbch = {'type': 'flux', 'value': 0.0}
-#ubch = {'type': 'flux', 'value': 0.0}
-#sourceh = np.ones(g) * 10.0
-#fluxes, states, dto = heat_flow(dt, z, initial_state, parameters, sourceh, lbch, ubch, steps=10)
 
 #%% test moss 
 import pandas as pd
@@ -142,20 +119,6 @@ forcing = {'zenith_angle': zen,
            }
 
 forcing = pd.DataFrame(forcing)
-
-#forcing = {'zenith_angle': 0.5,
-#           'dir_par': 50.0, # 25.0,
-#           'dif_par': 50.0,
-#           'dir_nir': 50.0, 
-#           'dif_nir': 50.0, 
-#           'lw_in': 330.0, 
-#           'friction_velocity': 0.05,
-#           'air_temperature': 20.0,
-#           'h2o': 0.0115,
-#           'co2': 400.0,
-#           'air_pressure': 101300.0,
-#           'soil_temperature': 10.0,
-#           }
 
 
 lbc = {'heat': {'type': 'flux', 'value': 0.0},
@@ -264,6 +227,16 @@ plt.subplot(426);
 WATER_DENSITY = 1.0e3
 yy = results['Wliq'] * WATER_DENSITY / Moss.bulk_density
 plt.contourf(t, Moss.z, yy); plt.colorbar(); plt.title('water content [g/g]'); plt.ylabel('z [m]')
+
+# bulk evaporation rate and bulk water content
+DEG_TO_KELVIN = 273.15
+
+L = 1e3 * (3147.5 - 2.37 * (forcing['air_temperature'] + DEG_TO_KELVIN)) # J kg-1
+
+E = results['LE'] / L
+
+plt.subplot(427)
+plt.plot(t, 1e3*60*E, 'r-')
 #%% test radiation module
 #g = np.ones(np.shape(Moss.Radiation.Lz))
 #rad_forcing = {'zenith_angle': 0.5, 'dir_par': 150.0, 'dif_par': 150.0,
@@ -277,12 +250,12 @@ plt.contourf(t, Moss.z, yy); plt.colorbar(); plt.title('water content [g/g]'); p
 #
 ##
 #dt = 20*1800.0
-Pamb = 101300.0
-rh = 0.5
-Ta = 20.0
-es = 611.0 * np.exp((17.502 * Ta) / (Ta + 240.97))  # Pa
-es = es / Pamb   
-H2Oa = rh * es # mol/mol
+#Pamb = 101300.0
+#rh = 0.5
+#Ta = 20.0
+#es = 611.0 * np.exp((17.502 * Ta) / (Ta + 240.97))  # Pa
+#es = es / Pamb   
+#H2Oa = rh * es # mol/mol
 #Uo =0.3
 #
 #U = Uo * np.exp(Moss.LAI / 2 * (z / Moss.height - 1.0))

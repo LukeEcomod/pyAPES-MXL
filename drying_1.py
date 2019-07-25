@@ -3,6 +3,9 @@
 Created on Thu Jul  4 11:05:33 2019
 
 @author: slauniai
+
+Try to replicate Elumeeva et al. 2011 J. Veget. Sci. experiment
+
 """
 
 import numpy as np
@@ -12,11 +15,46 @@ import matplotlib.pyplot as plt
 
 from moss.MLM_Moss import MLM_Moss
 
+
+"""
+ambient conditions in the lab experiment:
+"""
+Par = 50.0 # Wm-2
+Pamb = 101300.0 # Pa
+Ta =  23.0 # -1, +3 degC
+RH = 46.0 # +/- 5%
+es = 611.0 * np.exp((17.502 * Ta) / (Ta + 240.97))  # Pa
+es = es / Pamb   
+H2Oa = RH/100 * es # mol/mol
+U = 0.05 # ms-1; air flow inside
+
+forcing = {'zenith_angle': 0.78, # 45degC
+           'dir_par': Par, # 25.0,
+           'dif_par': Par,
+           'dir_nir': Par, 
+           'dif_nir': Par, 
+           'lw_in': 330.0, 
+           'wind_speed': U,
+           'air_temperature': Ta,
+           'h2o': H2Oa,
+           'co2': 400.0,
+           'air_pressure': 101300.0,
+           'soil_temperature': 10.0,
+           'precipitation': 0.0
+           }
+
+
+lbc = {'heat': {'type': 'flux', 'value': 0.0},
+       #'heat': {'type': 'temperature', 'value': 15.0},
+       #'water': {'type': 'head', 'value': -0.01}
+       'water': {'type': 'flux', 'value': 0.0}
+      }
+
 # make grid and lad
 dz = 0.005 # grid size
-height = 0.02
+height = 0.03
 z = np.arange(0, (height + dz), dz)
-LAI = 10.0
+LAI = 10.0*0.42
 
 a = np.ones(np.shape(z)) 
 lad = a / sum(a*dz) * LAI
@@ -24,8 +62,8 @@ lad = a / sum(a*dz) * LAI
 # pleurozium
 para = {'height': height,
         'lad': lad,
-        'bulk_density': 5.0, #20.0,
-        'max_water_content': 11.0,
+        'bulk_density': 15.0, #20.0,
+        'max_water_content': 10.0,
         'min_water_content': 0.2,
         'pF':{'alpha': 0.13, 'n': 2.17, 'l': -2.37, 'Ksat': 1.2e-8},
         'porosity': 0.98,
@@ -76,7 +114,7 @@ para = {'height': height,
 #        }
 
 # initial state
-initial_state = {'temperature': a * 20.0,
+initial_state = {'temperature': a * 23.0,
                  'water_potential': a * -0.01, 
                  'Utop': 5.0,
                  'Ubot': 0.0
@@ -86,64 +124,12 @@ initial_state = {'temperature': a * 20.0,
 Moss = MLM_Moss(z, para, initial_state)
 
 #%% test moss 
-import pandas as pd
-from tools.read_bryo_forcing import read_forcing
-from canopy.radiation import solar_angles
-#
-#ffile = r'c:\repositories\pyAPES-MXL\forcing\moss\bryo_microclimate_LAI1.0.csv'
-#
-#dat = read_forcing(ffile)
-#dat = dat[dat.columns].resample('1T')
-#dat = dat.interpolate('linear')
-
-#jday = dat.index.dayofyear + dat.hh/24.0 + dat.mm/(24*60)
-
-#zen, azim, decl, sunrise, sunset, daylength = solar_angles(62.0, 24.0, jday)
-
-#forcing = {'zenith_angle': zen,
-#           'dir_par': dat.Par*0.5,
-#           'dif_par': dat.Par*0.5,
-#           'dir_nir': dat.Nir*0.5, 
-#           'dif_nir': dat.Nir*0.5, 
-#           'lw_in': dat.LWdn,
-#           'wind_speed': dat.U,
-#           'friction_velocity': dat.U / 10.0,
-#           'air_temperature': dat.Ta,
-#           'h2o': dat.H2O,
-#           'co2': 1e6*dat.CO2,
-#           'air_pressure': 101300.0,
-#           'soil_temperature': dat.Ts,
-#           }
-#
-#forcing = pd.DataFrame(forcing)
-
-forcing = {'zenith_angle': 0.5,
-           'dir_par': 50.0, # 25.0,
-           'dif_par': 50.0,
-           'dir_nir': 50.0, 
-           'dif_nir': 50.0, 
-           'lw_in': 330.0, 
-           'wind_speed': 0.05,
-           'air_temperature': 20.0,
-           'h2o': 0.0115,
-           'co2': 400.0,
-           'air_pressure': 101300.0,
-           'soil_temperature': 10.0,
-           'precipitation': 0.0
-           }
-
-
-lbc = {'heat': {'type': 'flux', 'value': 0.0},
-       #'heat': {'type': 'temperature', 'value': 15.0},
-       #'water': {'type': 'head', 'value': -0.01}
-       'water': {'type': 'flux', 'value': 0.0}
-      }
             
 c = len(Moss.Flow.z)
 d = len(Moss.z)
 
 dt = 60.0
-Nsteps = int(24*1*3600 / dt)
+Nsteps = int(2*3600 / dt)
 
 results = {'T': np.ones((c, Nsteps))*np.NaN, 'H2O': np.ones((c, Nsteps))*np.NaN,
            'Tmoss': np.ones((d, Nsteps))*np.NaN, 'Wliq': np.ones((d, Nsteps))*np.NaN,
@@ -246,7 +232,7 @@ L = 1e3 * (3147.5 - 2.37 * (forcing['air_temperature'] + DEG_TO_KELVIN)) # J kg-
 E = results['LE'] / L
 
 plt.subplot(427)
-plt.plot(t, 1e3*60*E, 'r-'); plt.ylabel('E gm-2 min-1')
+plt.plot(t, 1e6*E, 'r-'); plt.ylabel('E mgm-2 s-1')
 plt.subplot(428);
 plt.plot(t, np.mean(results['Wliq'], axis=0) * WATER_DENSITY / Moss.bulk_density)
 #%% test radiation module
