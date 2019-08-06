@@ -14,7 +14,7 @@ from moss.MLM_Moss import MLM_Moss #, water_flow, heat_flow
 
 # make grid and lad
 dz = 0.005 # grid size
-height = 0.05
+height = 0.10
 z = np.arange(0, (height + dz), dz)
 LAI = 10.0
 
@@ -24,10 +24,10 @@ lad = a / sum(a*dz) * LAI
 # pleurozium
 para = {'height': height,
         'lad': lad,
-        'bulk_density': 20.0,
+        'bulk_density': 15.0,
         'max_water_content': 10.0,
-        'min_water_content': 1.5,
-        'pF':{'alpha': 0.13, 'n': 2.17, 'l': -2.37, 'Ksat': 1.2e-8},
+        'min_water_content': 1.0,
+        'pF':{'alpha': 0.13, 'n': 2.17, 'l': -2.37, 'Ksat': 1.2e-6},
         'porosity': 0.98,
         'length_scale': 0.005,
         'freezing_curve': 0.25,
@@ -43,7 +43,7 @@ para = {'height': height,
                      },
         # flow parameters
         'flow': {'zref': 0.2,
-                 'Sc': 2.0,
+                 'Sc': 1.0,
                  'gam': 0.1
                  }
         }
@@ -131,7 +131,7 @@ c = len(Moss.Flow.z)
 d = len(Moss.z)
 
 dt = 60.0
-Nsteps = int(24*1*3600 / dt)
+Nsteps = int(24*5*3600 / dt)
 #t_final = 24*3600.0
 #dt = 300.0
 #Nsteps = int(t_final / dt)
@@ -188,15 +188,15 @@ fig.set_size_inches(13.0, 16.0)
 
 #plt.figure(12)
 plt.subplot(421); 
-plt.plot(t, results['Rnet'], '-', label='Rnet'); plt.plot(t, results['LE'], '-', label='LE'); 
-plt.plot(t, results['H'], '-', label='H'); plt.legend()
+plt.plot(t, results['Rnet'], '-', label='Rn'); plt.plot(t, results['LE'], '-', label='LE'); 
+plt.plot(t, results['H'], '-', label='H'); plt.ylabel('Wm$^{-2}$'); plt.legend()
 
-plt.subplot(422); plt.plot(t, np.mean(results['Wliq'], axis=0), 'b-', label='Wbulk'); plt.ylabel('m3m-3')
+plt.subplot(422); plt.plot(t, np.mean(results['Wliq'], axis=0), 'b-', label='$\\theta$'); plt.ylabel('m3m-3')
 plt.legend()
 ax2 = plt.gca().twinx()
-ax2.plot(t, np.mean(results['Tmoss'], axis=0), 'r-', label='Tmoss ave'); plt.ylabel('degC')
-ax2.plot(t, results['T'][-1,:], 'k-', label='Ta top')
-ax2.plot(t,  results['T'][Moss.Nlayers,:], 'k:', label='Ta hc');
+ax2.plot(t, np.mean(results['Tmoss'], axis=0), 'r-', label='Tave'); plt.ylabel('degC')
+ax2.plot(t, results['T'][-1,:], 'k-', label='$T_{a,ref}$')
+ax2.plot(t,  results['T'][Moss.Nlayers,:], 'k:', label='$T_{a,h}$');
 #ax2.plot(t,  results['T'][0,:], 'k--', label='Ta bot'); 
 
 #ax2.plot(t,  np.mean(results['T'][0:Moss.Nlayers,:], axis=0), 'r:', label='Ta bulk');
@@ -205,39 +205,48 @@ plt.legend()
 
 plt.subplot(423); plt.contourf(t, Moss.z, results['LEz']);plt.colorbar(); plt.title('LE [Wm-2]'); plt.ylabel('z [m]')
 plt.subplot(424); plt.contourf(t, Moss.z, results['Hz']); plt.colorbar(); plt.title('H [Wm-2]'); plt.ylabel('z [m]')
-plt.subplot(425); plt.contourf(t, Moss.z, results['Wliq']); plt.colorbar(); plt.title('Wliq [m3m-3]'); plt.ylabel('z [m]')
-plt.subplot(426); plt.contourf(t, Moss.z, results['Tmoss']); plt.colorbar(); plt.title('Tmoss [degC]'); plt.ylabel('z [m]')
+plt.subplot(425); plt.contourf(t, Moss.z, results['Wliq']); plt.colorbar(); plt.title('$\\theta$ [m3m-3]'); plt.ylabel('z [m]')
+plt.subplot(426); plt.contourf(t, Moss.z, results['Tmoss']); plt.colorbar(); plt.title('T [degC]'); plt.ylabel('z [m]')
 plt.subplot(427); plt.contourf(t, Moss.Flow.z, 1e3*results['H2O']); plt.colorbar(); plt.title('H2O [ppth] air'); plt.ylabel('z [m]'); plt.xlabel('hours')
 plt.plot([t[0], t[-1]], [Moss.z[-1], Moss.z[-1]], 'k--')
-plt.subplot(428); plt.contourf(t, Moss.Flow.z, results['T']); plt.colorbar(); plt.title('Tair [degC]'); plt.ylabel('z [m]'); plt.xlabel('hours')
+plt.subplot(428); plt.contourf(t, Moss.Flow.z, results['T']); plt.colorbar(); plt.title('Ta [degC]'); plt.ylabel('z [m]'); plt.xlabel('hours')
 plt.plot([t[0], t[-1]], [Moss.z[-1], Moss.z[-1]], 'k--')
     
 fig = plt.figure()
 fig.set_size_inches(13.0, 16.0)
 dy = results['Tmoss'] - results['T'][0:Moss.Nlayers,:]
-plt.subplot(421); plt.contourf(t, Moss.z, dy); plt.colorbar(); plt.title('Tm -Ta [degC]'); plt.ylabel('z [m]')
-dT = results['Tmoss'] - np.mean(results['Tmoss'], axis=0)
-plt.subplot(422); plt.contourf(t, Moss.z, dT); plt.colorbar(); plt.title('Tmoss - Tmoss, ave[degC]'); plt.ylabel('z [m]')
-plt.subplot(423); plt.contourf(t, Moss.z, results['SWabs']); plt.colorbar(); plt.title('SW abs'); plt.ylabel('z [m]')
-plt.subplot(424); plt.contourf(t, Moss.z, results['LWabs']); plt.colorbar(); plt.title('LW abs'); plt.ylabel('z [m]')
-plt.subplot(425); plt.contourf(t, Moss.z, results['LWabs']); plt.colorbar(); plt.title('LW abs'); plt.ylabel('z [m]')
+a = results['Tmoss']
+r, c = np.shape(a)
+b = np.ones((r,c))
+for k in range(0, c):
+    b[:, k] = b[:,k]*a[0, k]
+dT = a - b
+plt.subplot(421); plt.contourf(t, Moss.z, dy); plt.colorbar(); plt.title('T -Ta [degC]'); plt.ylabel('z [m]')
+ix = (t >= 60)
+plt.subplot(423); plt.contourf(t[ix], Moss.z, dy[:,ix], vmin=-3, vmax=3); plt.colorbar(); plt.title('T -Ta [degC] t>60h'); plt.ylabel('z [m]')
+#dT = results['Tmoss'] - np.mean(results['Tmoss'], axis=0)
+plt.subplot(422); plt.contourf(t, Moss.z, dT); plt.colorbar(); plt.title('T - Tbot [degC]'); plt.ylabel('z [m]')
+plt.subplot(424); plt.contourf(t[ix], Moss.z, dT[:,ix], vmin=-3, vmax=3); plt.colorbar(); plt.title('T - Tbot[degC] t>60h'); plt.ylabel('z [m]')
 
+plt.subplot(425); plt.contourf(t, Moss.z, results['SWabs']); plt.colorbar(); plt.title('SW abs'); plt.ylabel('z [m]')
+plt.subplot(426); plt.contourf(t, Moss.z, results['LWabs']); plt.colorbar(); plt.title('LW abs'); plt.ylabel('z [m]')
+plt.subplot(427); plt.contourf(t, Moss.z, results['S']) ; plt.colorbar(); plt.title('heat sink/source s (Wm-3)'); plt.ylabel('z [m]'); plt.xlabel('hours')
 # gravimetric water content
-plt.subplot(426);
+plt.subplot(428);
 WATER_DENSITY = 1.0e3
 yy = results['Wliq'] * WATER_DENSITY / Moss.bulk_density
-plt.contourf(t, Moss.z, yy); plt.colorbar(); plt.title('water content [g/g]'); plt.ylabel('z [m]')
+plt.contourf(t, Moss.z, yy); plt.colorbar(); plt.title('water content [g/g]'); plt.ylabel('z [m]'); plt.xlabel('hours')
 
-# bulk evaporation rate and bulk water content
-DEG_TO_KELVIN = 273.15
-
-L = 1e3 * (3147.5 - 2.37 * (forcing['air_temperature'] + DEG_TO_KELVIN)) # J kg-1
-
-E = results['LE'] / L
-
-plt.subplot(427)
-plt.plot(t, 1e3*60*E, 'r-')
-#%% test radiation module
+## bulk evaporation rate and bulk water content
+#DEG_TO_KELVIN = 273.15
+#
+#L = 1e3 * (3147.5 - 2.37 * (forcing['air_temperature'] + DEG_TO_KELVIN)) # J kg-1
+#
+#E = results['LE'] / L
+#
+#plt.subplot(427)
+#plt.plot(t, 1e3*60*E, 'r-')
+##%% test radiation module
 #g = np.ones(np.shape(Moss.Radiation.Lz))
 #rad_forcing = {'zenith_angle': 0.5, 'dir_par': 150.0, 'dif_par': 150.0,
 #               'dir_nir': 150.0, 'dif_nir': 150.0, 'lw_in': 300.0,

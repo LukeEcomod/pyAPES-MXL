@@ -238,7 +238,7 @@ class MLM_Moss(object):
 
         max_errT = 0.0001  # relativeerror
         max_errh2o = 0.0001 # relative error
-        max_errTs = 0.001 # degC
+        max_errTs = 0.0001 # degC
         
         max_iter = 500 #50  # maximum iterations
         err_T, err_h2o, err_Ts = 999., 999., 999.
@@ -329,7 +329,8 @@ class MLM_Moss(object):
             LEres.append(fluxes['LE'])
             Tsres.append(Ts)
 
-        #print('iterNo=', iter_no)
+        if iter_no > 400:
+            print('iterNo=', iter_no)
         
         # solve moss water flow
         parameters = {'pF': self.pF,
@@ -433,9 +434,9 @@ class MLM_Moss(object):
         available_space -= interc
         
 
-        # convert units
+        # convert units: sink at layer
         interc = interc / dt / WATER_DENSITY / self.dz # s-1
-        adv_heat = interc / WATER_DENSITY * CV_WATER * Ta # W m-3
+        adv_heat = interc * CV_WATER * Ta # W m-3
         
         """ ------- """
         
