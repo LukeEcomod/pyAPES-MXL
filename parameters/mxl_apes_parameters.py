@@ -169,14 +169,17 @@ micromet = {'zos': 0.01,  # forest floor roughness length [m]  -- not used?
             'Cd': 0.15,  # drag coefficient
             'Utop': 5.0,  # U
             'Ubot': 0.0,  # m/s, no-slip
-            'Sc': {'T': 1.0, 'H2O': 1.0, 'CO2': 1.0}  # Schmidt numbers
+            'Sc': {'T': 1.0, 'H2O': 1.0, 'CO2': 1.0}  # turbulent Schmidt numbers
             }
+
 # --- radiation ---
 radiation = {'clump': 0.7,  # clumping index [-]
              'leaf_angle': 1.0,  # leaf-angle distribution [-]
              'Par_alb': 0.12,  # shoot Par-albedo [-]
              'Nir_alb': 0.55,  # shoot NIR-albedo [-]
-             'leaf_emi': 0.98
+             'leaf_emi': 0.98,
+             'SWmodel': 'ZHAOQUALLS', #'SPITTERS'
+             'LWmodel': 'ZHAOQUALLS', #'FLERCHINGER'
              }
 
 # --- interception ---
@@ -241,13 +244,15 @@ pt1 = { 'name': 'generic_tree',
             }
         }
 
-# --- ground surface (for testing)
+# --- ground surface (for testing, include soil model if needed)
 ground = {'soildepth': 10.0,
           'temperature': 10.0, 
           'emissivity': 0.98,
           'albedo': {'PAR':0.05, 'NIR': 0.2}
          }
-        
+
+# compile all into single dict imported from test_mxl_apes
+
 cpara = {'loc': loc,
          'ctr': ctr,
          'grid': grid,

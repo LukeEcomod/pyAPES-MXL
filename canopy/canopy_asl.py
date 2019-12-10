@@ -32,7 +32,7 @@ class CanopyModel(object):
     """
 
     def __init__(self, cpara):
-        r""" Initializesobject and submodel objects using given parameters.
+        r""" Initializes object and submodel objects using given parameters.
 
         Args:
             cpara (dict):
@@ -98,7 +98,7 @@ class CanopyModel(object):
                     self.Switch_WMA,
                     self.Switch_Ebal)
 
-        # --- Plant types (with phenological models) ---
+        # --- Plant types: array of PlantType -classes for modeling leaf gas exchange etc. ---
         dz_soil = cpara['ground']['soildepth']
         ptypes = []
         for pt in cpara['planttypes']:        
@@ -135,7 +135,7 @@ class CanopyModel(object):
         else:
             self.hc = 0.0
 
-        # --- radiation, micromet, interception, and forestfloor instances
+        # --- radiation, micromet, interception, and forestfloor model instances
         self.radiation = Radiation(cpara['radiation'], self.Switch_Ebal)
 
         self.micromet = Micromet(self.z, self.lad, self.hc, cpara['flow'])
@@ -180,27 +180,27 @@ class CanopyModel(object):
         Args:
             dt: timestep [s]
             z_asl: surface layer height [m]
-            forcing (dataframe): meteorological and soil forcing data  !! NOT UP TO DATE
-                'precipitation': precipitation rate [m s-1]
-                'dir_par': direct fotosynthetically active radiation [W m-2]
-                'dif_par': diffuse fotosynthetically active radiation [W m-2]
-                'dir_nir': direct near infrared radiation [W m-2]
-                'dif_nir': diffuse near infrare active radiation [W m-2]
+            forcing (dict):
+                'zenith_angle' [rad]
+                'PAR': {'direct', 'diffuse'}: incoming PAR [Wm-2]
+                'NIR': {'direct', 'diffuse'}: incoming NIR [Wm-2]
                 'lw_in': Downwelling long wave radiation [W m-2]
                 'air_temperature': air temperature at z_asl [\ :math:`^{\circ}`\ C]
                 'co2': CO2 mixing ratio at z_asl [ppm]
                 'h2o': ambient H2O mixing ratio at z_asl [mol mol-1]
                 'wind_speed': mean wind speed at z_asl [m s-1]
                 'air_pressure': pressure [Pa]
-                'zenith_angle': solar zenith angle [rad]
+                
+                # 1st soil node state
                 'soil_temperature': [\ :math:`^{\circ}`\ C] properties of first soil node
                 'soil_water_potential': [m] properties of first soil node
                 'soil_volumetric_water': [m m\ :sup:`-3`\ ] properties of first soil node
+            
             'parameters':
                 'date'
-                'thermal_conductivity': [W m\ :sup:`-1`\  K\ :sup:`-1`\ ] properties of first soil node
-                'hydraulic_conductivity': [m s\ :sup:`-1`\ ] properties of first soil node
-                'depth': [m] properties of first soil node
+                'soil_thermal_conductivity': [W m\ :sup:`-1`\  K\ :sup:`-1`\ ] properties of first soil node
+                'soil_hydraulic_conductivity': [m s\ :sup:`-1`\ ] properties of first soil node
+                'soil_depth': [m] properties of first soil node
 
         Returns:
             fluxes (dict)
@@ -312,7 +312,7 @@ class CanopyModel(object):
             for key in sources.keys():
                 sources[key] = 0.0 * self.ones
 
-            # --- wet leaf water and energy balance ---
+            # --- rainfall interception, wet leaf water and energy balance ---
             interception_forcing = {
                 'h2o': H2O,
                 'wind_speed': U,
@@ -363,10 +363,11 @@ class CanopyModel(object):
             for key in wetleaf_fluxes['sources'].keys():
                 sources[key] += wetleaf_fluxes['sources'][key] / self.dz
 
-            # canopy layer leaf temperature
+            # canopy layer leaf temperature; multiplication by lad is compensated later when 
+            # effective (wet + dry leaf) temperature is computed
             Tleaf = self.interception.Tl_wet * (1 - df) * self.lad
 
-            # --- dry leaf gas-exchange ---
+            # --- dry leaf gas-exchange: computed for several planttypes---
             pt_stats = []
             for pt in self.planttypes:
 

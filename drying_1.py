@@ -245,9 +245,13 @@ x3 = np.linspace(1.0, 10, 10)
 L = 1e3 * (3147.5 - 2.37 * (23.0 + DEG_TO_KELVIN)) # J kg-1 
 
 plt.figure()
-plt.plot(x1, 1e6*np.array(E1) / L, 'ko', label='LAI=5.0'); plt.ylabel('Evaporation rate (mgm-2s-1)'); plt.xlabel(' height (m)'); plt.title('LAI=5.0 m2m-2')
-plt.plot(x1, 1e6*np.array(E2) / L, 'ro', label='$\Lambda_l$=100.0 m$^2$m$^{-3}$'); 
+plt.subplot(121)
+plt.plot(x1, 1e6*np.array(E1) / L, 'ko-', label='LAI=5.0'); plt.ylabel('Evaporation rate (mgm$^{-2}$s$^{-1}$)'); plt.xlabel(' height (m)');
+plt.plot(x1, 1e6*np.array(E2) / L, 'ro-', label='$\Lambda_l$=100.0 m$^2$m$^{-3}$'); 
 plt.legend()
+
+plt.subplot(122)
+plt.plot(x3, 1e6*np.array(E3) / L, 'ko-'); plt.ylabel('Evaporation rate (mgm$^{-2}$s$^{-1}$)'); plt.xlabel('LAI (m$^2$m$^{-2}$)'); plt.title('h = 0.05 m')
 
 #%%
 #L = 1e3 * (3147.5 - 2.37 * (23.0 + DEG_TO_KELVIN)) # J kg-1

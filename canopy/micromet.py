@@ -51,7 +51,7 @@ class Micromet(object):
         """
 
         # parameters
-        self.zos = p['zos']  # forest floor roughness length [m]
+        #self.zos = p['zos']  # forest floor roughness length [m]
 
         self.dPdx = p['dPdx']  # horizontal pressure gradient
         self.Cd = p['Cd']  # drag coefficient

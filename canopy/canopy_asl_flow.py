@@ -51,7 +51,7 @@ class Micromet(object):
                 'Sc' (dict): {'T','H2O','CO2'} Schmidt numbers
         Returns:
             self (object)
-        NOTE: this assumes now that Utop and Ubot given to model are dimensionless [ms-1]
+        NOTE: this assumes now that Utop and Ubot given to model are in [ms-1]
         """
 
         # parameters
@@ -59,7 +59,7 @@ class Micromet(object):
         self.Cd = p['Cd']  # drag coefficient
         self.Utop = p['Utop']  # wind speed at top boundary [ms-1]
         self.Ubot = p['Ubot']  # wind speed at lwer boundary [ms-1]
-        self.Sc = p['Sc']  # Schmidt numbers
+        self.Sc = p['Sc']  # turbulent Schmidt numbers
         self.dPdx = p['dPdx']  # horizontal pressure gradient
         
         # grid       
@@ -95,7 +95,7 @@ class Micromet(object):
             ust0 (float): ustar at top; give if Utop & Ubot are normalized
         """
         
-        # pad lad with zeros to account for growing z
+        # pad lad with zeros to account for growing z in the convective abl
         n = len(z)
         m = len(lad)
         if n > m:

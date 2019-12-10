@@ -25,14 +25,19 @@ L_MOLAR = 44100.0 # J mol-1, latent heat of vaporization at 20degC
 
 def read_mxl_forcing(ffile, start_time=None, end_time=None, dt0=1800.0, dt=1800.0, na_values='NaN'):
     """
-    reads 30 min forcing data and returns dataframe
+    reads forcing data and returns dataframe
     
     cols = ['year','month', 'day', 'doy', 'hour', 'minute', 'U', 'ust', 'Ta', 'RH', 'CO2', 'H2O', 'O3',
             'Prec', 'P', 'dirPar', 'diffPar', 'dirNir', 'diffNir', 'Rnet', 'LWin', 'LWout',
             'LWnet', 'Tsh', 'Tsa','Tsc', 'Wh', 'emiatm', 'cloudfract', 'Rew', 'Psi_s', 'Zen', 'Azim', 'Daylength',
             'Ws', 'Tdaily', 'X', 'DDsum', 'H', 'LE', 'NEE', 'qc_H', 'qc_LE', 'qc_NEE']
+    Args:
+        ffile - filename
+        start_time & end_time: str, eg. "2014-01-01 05:00"
+        dt0 - timestep in forcing data (s)
+        dt - output timestep (s), nearest neighbour interpolation
     Returns:
-        dataframe with columns ['ust', 'wt', 'wq', 'wc']]
+        dataframe
     """
     
     dat = pd.read_csv(ffile, sep=';', header='infer')

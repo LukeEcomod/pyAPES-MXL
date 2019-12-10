@@ -356,9 +356,9 @@ class PlantType(object):
         pt_stats.update({k: np.sum((sl[k]*f1 + sh[k]*f2)) / np.sum(self.lad + EPS) for k in keys})
 
         # leaf temperatures
-        pt_stats.update({'Tleaf': f_sl * sl['Tl'] + (1.0 - f_sl) * sh['Tl']})  # dry leaf temperature
-        pt_stats.update({'Tleaf_sl': sl['Tl'] * self.lad})
-        pt_stats.update({'Tleaf_sh': sh['Tl'] * self.lad})
+        pt_stats.update({'Tleaf': f_sl * sl['Tl'] + (1.0 - f_sl) * sh['Tl']})  # dry leaf temperature. Move outside integrate?
+        pt_stats.update({'Tleaf_sl': sl['Tl'] * self.lad}) # plant-level lad-weighted sunlit temperature
+        pt_stats.update({'Tleaf_sh': sh['Tl'] * self.lad}) # --""-- shaded temperature
 
         return pt_stats, layer_stats
 

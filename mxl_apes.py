@@ -167,6 +167,8 @@ class Model(object):
 
         #print('RUNNING')
         k_steps=np.arange(0, self.Nsteps, int(self.Nsteps/10))
+        
+        # -- loop in time
         for k in range(0, self.Nsteps):
             print('step=', k)
             # progress bar

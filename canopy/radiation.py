@@ -32,7 +32,7 @@ from .constants import EPS, DEG_TO_RAD, DEG_TO_KELVIN, STEFAN_BOLTZMANN, SPECIFI
 logger = logging.getLogger(__name__)
 
 class Radiation(object):
-    r""" Describes distribution of within canopy radiation.
+    r""" Radiation inside plant canopies
     """
     def __init__(self, p, Ebal):
         """
@@ -44,9 +44,9 @@ class Radiation(object):
                 'leaf_emi': 0.98
             Ebal: boolean; True solves LW radiation
             # following are given as time-dependent parameters in function calls
-            #'soil_Par_alb': soil (moss) Par-albedo [-] --- SHOULD COME FROM ForestFloor
+            #'soil_Par_alb': soil (moss) Par-albedo [-]
             #'Nir_alb': shoot NIR-albedo [-]
-            #'soil_Nir_alb': soil (moss) NIR-albedo [-] --- SHOULD COME FROM ForestFloor
+            #'soil_Nir_alb': soil (moss) NIR-albedo [-]
             #'soil_emi': 0.98,
         Returns:
             self (object)
@@ -59,9 +59,9 @@ class Radiation(object):
                     'NIR': p['Nir_alb']}  # shoot Nir-albedo [-]
         self.leaf_emi = p['leaf_emi']
 
-        # model functions to use
-        self.SWmodel = 'ZHAOQUALLS'
-        self.LWmodel = 'ZHAOQUALLS'
+        # model functions to use: move into arguments!
+        self.SWmodel = p['SWmodel'] # 'ZHAOQUALLS'
+        self.LWmodel = p['LWmodel'] # 'ZHAOQUALLS'
         logger.info('Shortwave radiation model: %s', self.SWmodel)
         if Ebal:
             logger.info('Longwave radiation model: %s', self.LWmodel)
